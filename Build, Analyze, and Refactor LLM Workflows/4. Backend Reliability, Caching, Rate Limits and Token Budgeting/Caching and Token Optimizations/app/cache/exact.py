@@ -1,37 +1,38 @@
 # app/cache/exact.py
 
-import hashlib
+import hashlib                   #For SHA256 hashing
 from typing import Optional
-import redis.asyncio as redis
-from loguru import logger
-from app.config import settings
+import redis.asyncio as redis    #Async Redis client
+from loguru import logger        #Structured logging
+from app.config import settings  #see config.py
 
 
 class ExactCache:
     """Redis-based exact cache for identical query+context pairs."""
 
     def __init__(self):
-        self.redis = redis.from_url(
+        """Initialize Redis connection pool from settings."""
+        self.redis = redis.from_url(  #self.redis = name of the Redis client
             settings.redis_url,
             max_connections=settings.redis_max_connections,
-            decode_responses=True
+            decode_responses=True   #decoding bytes to UFT-8 strings
         )
         logger.info(f"ExactCache initialized with Redis URL: {settings.redis_url}")
 
     def _make_key(self, query: str, context: str) -> str:
         """Create a deterministic cache key from query and context."""
-        content = f"{context}|{query}"
-        hash_hex = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        content = f"{context}|{query}"     # Combine context and query; context can be empty (| ensure uniqueness, even if context is empty
+        hash_hex = hashlib.sha256(content.encode("utf-8")).hexdigest()  #hash length fixed and avoid special chars
         return f"chat:{hash_hex}"
 
     async def get(self, query: str, context: str = "") -> Optional[str]:
         """Retrieve cached response for exact query+context."""
         key = self._make_key(query, context)
-        response = await self.redis.get(key)
+        response = await self.redis.get(key)   #is a non-blocking async call
         if response is not None:
-            logger.debug(f"Exact cache HIT for key {key[:20]}...")
+            logger.debug(f"Exact cache HIT for key {key[:20]}...")  #we truncate at 21 chars for readability
         else:
-            logger.debug(f"Exact cache MISS for key {key[:20]}...")
+            logger.debug(f"Exact cache MISS for key {key[:20]}...") #we truncate at 21 chars for readability
         return response
 
     async def set(self, query: str, context: str, response: str) -> None:

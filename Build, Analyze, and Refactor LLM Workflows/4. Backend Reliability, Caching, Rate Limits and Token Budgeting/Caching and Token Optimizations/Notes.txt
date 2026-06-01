@@ -228,3 +228,9 @@ For storing a Redis keys, we compute a SHA256 has made of (context, query), this
 To not-blocking async operations, which is critical for FastAPI, we use redis.asyncio.
 To store the response, we use either JSON or plain text (plain text is enough in this project, but can be customized easily.
 The TTL is set up from settings.redis_ttl_seconds, the default is 3600 seconds = 1 hour.
+Lets us analyze the code:
+ • def _make_key - used to create the keys to memorize for the queries; given they are made of strings (possibly long),
+    we convert them to a fixed 54-char hex string (memory cost-efficient).
+ • async def get - tool to retrieve with cache: it retrieves cached response for exact query+context and returns a
+    response string if cache hit and None otherwise.
+    We note that logger.DEBUG - means that we log at DEBUG level, hence visible only when LOG_LEVEL = DEBUG.

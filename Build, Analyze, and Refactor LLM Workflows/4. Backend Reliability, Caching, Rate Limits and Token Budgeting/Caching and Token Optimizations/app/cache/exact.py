@@ -4,7 +4,6 @@ import hashlib
 from typing import Optional
 import redis.asyncio as redis
 from loguru import logger
-
 from app.config import settings
 
 

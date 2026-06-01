@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 from pydantic import ConfigDict, Field
 
 
-class settings(BaseSettings):
+class Settings(BaseSettings):
     """Application settings loaded from environment variables or .env file."""
 
     # Groq API

@@ -1,0 +1,230 @@
+GOALS FOR MY PROJECT
+1. Reduce LLM token costs by 70-90% using semantic similarity caching
+2. Implement advanced token control: dynamic truncation with tiktoken
+3. Use modern tools: FastAPI, Redis, Chroma, tiktoken, LangChain, Docker and deeply understand their roles
+
+SEMANTIC CACHING:
+The traditional caching works as follows:
+• storing exact query → response.
+    If user asks: "What is your return policy?" → cached.
+    If user asks: "What's your return policy?" (different wording) → cache miss → LLM call → tokens burned.
+    The Semantic caching works as follows:
+• storing EMBEDDING of query → response.
+    Both queries have similar embeddings → cache hit → instant response → zero tokens used.
+
+SEMANTIC CACHING WORKFLOW:
+1. Client POST /chat with { "query": "How do I return a defective product?", "context": "optional prior history" }
+2. FastAPI receives, creates a unique cache key = (context + query)
+3. Compute embedding of key using same embedder (all-MiniLM-L6-v2)
+4. Search Chroma for similar embeddings (cosine similarity)
+   - If similarity >= threshold (e.g., 0.92) → cache hit
+     - Return stored response immediately (latency ~10ms)
+     - Log cache hit, tokens saved = length_of_stored_response
+   - Else → cache miss
+     - Apply token control: check if prompt exceeds max_prompt_tokens. If yes, reject with HTTP 400 error; otherwise proceed.
+   - Call LLM (async, with streaming optional)
+     - Store in:
+       a) Redis (exact key → response, TTL) for exact-match speed
+       b) Chroma (embedding → response metadata) for semantic search
+     - Return LLM response
+5. Response includes metadata: cache_hit, tokens_used, tokens_saved, latency_ms
+
+TOKEN CONTROL WORKFLOW:
+• Use tiktoken to accurately count prompt tokens.
+• If token_count > max_prompt_tokens, reject the request immediately with HTTP 400 and a clear error message:
+   "Prompt too long (X tokens, limit Y). Please shorten your input."
+• No truncation is performed. The user is responsible for shortening the prompt.
+• This ensures data integrity and transparency – no silent alteration of the user's input.
+
+ECONOMIC ADVANTAGES:
+1. Cost reduction – Each cache hit saves $0.000X per call; at millions of queries, it's huge.
+2. Latency reduction – 2 seconds → 10ms for repeated/similar questions.
+3. Consistency – Same answer for similar questions (no model drift or slight hallucinations).
+4. Scalability – Cache servers can handle 100x more QPS than LLM endpoints.
+
+NEW TOOLS USED COMPARED TO OLD PROJECTS:
+1. FastAPI:
+	Async, automatic OpenAPI docs, high performance, type safety with Pydantic
+2. Redis:
+	De facto standard for low-latency exact cache, supports TTL, pub/sub
+3. Chroma:
+	Lightweight vector DB, persists to disk, good for semantic search at moderate scale
+4. tiktoken:
+	Fast token counting, used by OpenAI, works offline
+5. Docker Compose:
+	Run Redis + Chroma + app with one command – essential for portfolio
+6. LangChain (OLD):
+	Minimal use – only for LLM calls (abstraction to swap models) and embeddings (same embedder as your current system)
+
+TREE STRUCTURE OF THE PROJECT:
+semantic_cache_proxy/
+├── app/
+│   ├── __init__.py
+│   ├── main.py
+│   ├── config.py
+│   ├── models.py
+│   ├── cache/
+│   │   ├── __init__.py
+│   │   ├── semantic.py
+│   │   ├── exact.py
+│   │   └── token_control.py
+│   ├── llm_client.py
+│   └── utils.py
+├── docker-compose.yml
+├── Dockerfile
+├── requirements.txt
+├── .env.example
+└── README.md
+
+
+
+EXPLANATIONS OF THE VARIOUS FILES:
+
+REQUIREMENTS.TXT
+We will use 5 categories of tools:
+1. Web API → Expose the cache as a service (REST endpoints) → FastAPI + Uvicorn
+2. Caching → Store exact responses (Redis) and semantic embeddings (Chroma) → Redis, ChromaDB
+3. LLM & Embeddings → Generate answers (Groq) and convert queries to vectors (local embedder) → LangChain Groq, sentence-transformers
+4. Token Control → Count and truncate prompts to fit model limits → tiktoken
+5. Configuration & Utilities → Manage settings, retries, logging → pydantic-settings, tenacity, loguru
+Why these are modern and production-ready:
+• FastAPI – async, auto-OpenAPI docs, Pydantic validation – used by Netflix, Uber.
+• Redis – industry standard for low-latency caching (used by Twitter, GitHub).
+• Chroma – lightweight vector DB, but can be swapped for Qdrant/Weaviate later.
+• Groq – LPU inference (very fast), free tier, used by AI startups.
+• tiktoken – OpenAI's tokenizer, exact token counting (no estimation).
+• loguru – prettier, more informative logging than Python's built-in.
+Additional notes on this file:
+• uvicorn – ASGI server that runs FastAPI
+• redis – In-memory key-value store. We'll use redis.asyncio for non-blocking operations. Stores exact cache: (query_hash → response).
+• chromadb – Vector database. Stores embeddings of queries plus response metadata. We'll search for similar embeddings using cosine similarity
+• langchain-groq – Official Groq integration for LangChain. Wraps Groq's API with the standard LangChain BaseLLM interface
+• sentence-transformers – Library for sentence embeddings (from Hugging Face). We'll load all-MiniLM-L6-v2.
+    This runs locally, no API needed, uses ~80MB RAM. It converts queries into 384-dimensional vectors for similarity search.
+• tenacity – Retry library with decorators. We'll wrap the Groq API call with @retry to handle transient network errors
+• tiktoken – OpenAI's fast tokenizer. Even though we're using Groq, we can use the cl100k_base encoding (GPT-4's tokenizer)
+    as an approximation for any modern LLM. It counts tokens accurately, allowing us to truncate prompts to stay within Groq's context limit (e.g., 8192 tokens)
+• loguru – Modern logging with structured output, colors, and easy file rotation. We'll replace the standard logging module.
+
+
+CONFIG.PY
+In any production system, configuration must be separate from code. This allows:
+• Changing settings without modifying code (environment variables, .env file)
+• Running the same code in development, staging, and production
+• Keeping secrets (API keys) out of version control
+1. About Redis (REmote DIctionary Server): we use Redis when a user asks exactly the same question (byte-for-byte same string),
+     we want to return the cached response in ~10ms without going to Chroma or LLM.
+    We use Redis in Docker: redis://localhost:6379 and we put this in config.py, instead of hardcoding, allowing us to switch
+     between environments, for example Development and Production, seamlessly, without changing code.
+    With redis_ttl_seconds, we decide how long cached responses live, otherwise we would endlessly grow our memory, but, without, we would
+     lose the main purpose of caching for FAQ; TTL forces periodic LLM to refresh cache but keeping repetitive ones, at least temporarily.
+     In our project we set it at one hour, however, being in config.py, we can seamlessly change it, in regard to production demand.
+     Just to keep in mind, once the cache expires, next request will be a cache miss, forcing the LLM to give a fresh response.
+     Possible Redis enhancements, may include "socket_timeout", "retry_on_timeout", "health_check_interval".
+    With redis_max_connections, we establish a max in the connection pool size; if the limit is reached, the next requests will wait for a "socket" to open.
+     It is written in config.py in order to then customize it, with the business needs in production.
+     On a laptop 10 is fine; in a serious production environment, it can be easily scaled over 100.
+2. About Chroma: Chroma is a vector database. In our semantic cache, we store a KEY, namely an embedding vector, and a VALUE, namely the original query
+      text + the LLM response.
+     When a new query arrives, Chroma computes its embedding through the LLM; asks Chroma to find "the most similar stored embedding" through
+      similarity search (for example cosine similarity) and, if "similarity score >= similarity_threshold", we get a cache hit, hence we return the
+      cached response. Other vector embedding, eventually more powerful, are Qdrant or Pinecone or Weaviate.
+     With chroma_persist_directory, it says to Chroma where to store its data to then load it from the given directory; this is consistent
+      through restarts. In production, a Docker volume or a mounted permanent disk can be alternatively used. These settings are more easily
+      configurable through the config.py file. The defualt location is a "./chroma_cache" local folder in the project root.
+     With similarity_threshold, we define the minimum requirement to achieve the cosine similarity hit, therefore the cache hit. Empirically,
+      0.92 is the sweet spot for short queries (i.e. customer questions), balancing safety and hit rate. Must be a value between 0.0 and 1.0.
+      Other values raise a validation error at startup.
+     With embedding_model_name, it specifies the LLm to use for converting sentences/text into embeddings; the model runs locally and produces
+      vector of fixed dimensions to feed for the similarity search. Good models to use, given existing benchmarks: all-MiniLM-L6-v2 (lightweight,
+      ~80MB RAM, 384-dim vectors, with fast inference), all-mpnet-base-v2 (higher quality but bigger dimension 768-dim),
+      BAAI/bge-small-e (good for retrieval).
+     CONCERN: Unlike Redis, Chroma does NOT have a TTL (Time To Live), hence it can scale memory consuption scarily fast in production-like environments,
+      deletion is managed by-hand by default (concern!). Can be "hybridized" into a Redis like setting, we explain possible strategies:
+       2a. 1st strategy: Time-based Metadata + Periodic cleanup (consistent but objectove and non concept related)
+         We store a timestamp, added entry in metadata, for each entry and run a background job (i.e. daily) to delete entries older than N days.
+       2b. 2nd strategy: LRU (Last Recently Used), namely keep only last N entries (More complex, but more productyion solid)
+         We store up to N entries and gradually delete older ones upon addition of new ones
+       2c. 3rd strategy; Using more sophisticated tools
+         More complex but complete tools can be used intead of Chroma, namely Qdrant (support TTL), Weaving (supports time-based sharding and cleanup),
+          Pinecode (can set delete by metadata filter)
+     We used the LRU strategy
+     Nonetheless, the vector store can be simply changed later one without changin the logic (abstraction) of the project.
+3. About Token control: once we hit a cache miss (exact and sematic cache check), the LLM is called and the input may contain the User query,
+      additional context from the conversation and system instructions. If the total context exceed the mox context window (N tokens for each model),
+      the LLM may either refuse the request or truncate silently and unexpectedly; this is awful and disingenuous in production. Moreover, sinding long
+      prompts wastes tokens (cost) and increases latency (slowness). A common way to assess this problem are a "smarter" truncation
+      (namely keeping only the first 60% and last 40% of the prompt), which still acts silently towards the User.There could be more stable and "ethic"
+      ways for an honest and stable production-style solution:
+       3a. 1st strategy: Alert and Reject (more critically exact for the User, useful where data loss in not acceptable)
+         If token count > max_prompt_tokens, it does NOT call the LLM; but it reponds clearly stating to the User to shorten the prompt.
+          The response will be like Return HTTP 400 with error: "Prompt too long (X tokens, limit Y)"
+       3b. 2nd strategy: Smart sliding window (better for conversational systems where older context loses importance)
+         The memory only keeps the most recent N tokens and drops older context, i.e. chat memory
+     We used the Alert and Reject strategy.
+     The Token control will:
+       1. Counts tokens, measuring accurately prompt length through tiktoken
+       2. If len(prompt_tokens) > max_prompt_tokens, it will raise a HTTPException with details and NOT call the LLm, otherwise, the LLM call goes on.
+4. About Perfomance: it will handle error management, namely:
+     • request_timeout_seconds: float = Field(default=30.0, ge=1.0) - sets the max time (in seconds, this case 30) for the HTTP to send a response
+        from Groq after sending the request. If the time exceeds, the request is canceled and an exception is raised.
+        Good and customizable for production-grade scenarios.
+     • retry_attempts: int = Field(default=3, ge=0) - sets the max retry attempts for a LLm request before giving up, and, therefore, raising an exception.
+     • retry_backoff_factor: float = Field(default=1.0, ge=0.1) - controls the delay between retries, using the formula
+            delay = backoff_factor * (2 ^ (retry_number - 1))
+        hence:
+            Retry 1, wait one seond; Retry 2, wait 2 seconds; Retry 3, wait 4 seconds
+5. About Model Config: this class is the configuration for Pydantic's Base Setting, it controls how environment variables and .env files are loaded,
+      and how extra fields are handled. In particular, it says where to look for environment variables. By default, it reads from os.environ.
+      With env_files, it also reads from a .env file.
+     The extra part will say how we define extra fields, namely if we ignore, warn or raise an error.
+     The encoding ensures the .env file is read withUFT-8 (critical for non-ASCII characters).
+     This is standard for professional Python projects.
+     This layout ensures that secret data can be injected directly from private production settings, where secrets are stored.
+     It is provided a .env.example dummy file with example values and instructions.
+     If no .env file is found, the script simply skips it, no error, and it reads from system environment variables.
+
+
+MODEL.PY - DEEP DIVE INTO PYDANTIC
+Pydantic is a data validations and settings management library for Python, in particular for:
+ • Declarative models - Defining expected structures with type annotations;
+ • Automatic validation - Raises clear errors when data (types) do not match;
+ • Serialization - Converts Python objects to JSON (and back cleanly and effortlessly);
+ • Performance - Very fast computing (written in Rust v2);
+ • Integration - It is used by FastAPI, LangChain, LangGraph, Hugging Face, etc..
+Useful tools are
+ • BaseModel - A base class for creating Pydantic models. Inside this class, items can be more and more customized;
+ • Field - Adds metadata and validation constraints to a field beyond its data type (string, int, etc.);
+ • ValidationError - ValidationError raises detailed error messages if constraint conditions are not met;
+ • model_config - Controls the behavior of pydantic models and can specify config options, for example
+    "extra": "•••" - controls handling of extra fields, with 'forbid', 'ignore', 'allow' instead of •••, or
+    "str_strip_whitespace": True - trims out the whitespaces from strings, or
+    "frozen": True, makes the model immutable, or
+    description="•" add a text description to the fields created inside the class, or
+    "json_schema_extra": provides an example to feed the LLM (few shot prompt-ish);
+ • ge=xx or le=xx amounts to fix constraints on the intervals values can be taken from, for given objects.
+More classes in the same project can be created, depending on the use we make of them, for example, we will use:
+  ChatRequest, ChatResponse, ErrorResponse, CacheStatsResponse.
+A complete example, used in our project is in models.py. In this file, we defined the four classes stated above
+  to then feed our semantic proxy cache Chroma build.
+
+
+CACHE/EXACT.PY
+This file defines the exact cache (Redis) implementation. This is the first cache layer,
+  that will hit once the same question is repeated; in this case, the previous response is recycled, and, therefore,
+  no LLM tokens (no cost) are used and the latency is critically reduced (~10ms).
+  We recall that Redis looks in-memory, hence lookups tak microseconds (low latency); it supports TTL (Time-To-Live) rules,
+  so old queries expire automatically and, lastly, can be shared across multiple service instances, always natively,
+  which makes it good for scaling into production-like complex systems.
+It reasonably uses SQL-like commands, standard for query operations, and to manipulate relational databases.
+ The operations used in this project are
+ • get(query, context) - GET to fetch if the key exists, returning a cached response or NONE;
+ • set(query, context, response) - to store the response with TTL (from config);
+ • delete(key) (optional) – to manually DELETE keys in case of cache invalidation;
+ • stats() – this returns the number of keys, useful for monitoring.
+For storing a Redis keys, we compute a SHA256 has made of (context, query), this allows to keep keys short and deterministic.
+ REMARK: SHA256 HASH: short for Secure Hash Algorithm 256-bit, is a member of the SHA-2 family,
+  and it produces a unique 256-bit (32-byte) hash for any given input.
+To not-blocking async operations, which is critical for FastAPI, we use redis.asyncio.
+To store the response, we use either JSON or plain text (plain text is enough in this project, but can be customized easily.
+The TTL is set up from settings.redis_ttl_seconds, the default is 3600 seconds = 1 hour.

@@ -226,7 +226,7 @@ For storing a Redis keys, we compute a SHA256 has made of (context, query), this
  REMARK: SHA256 HASH: short for Secure Hash Algorithm 256-bit, is a member of the SHA-2 family,
   and it produces a unique 256-bit (32-byte) hash for any given input.
 To not-blocking async operations, which is critical for FastAPI, we use redis.asyncio.
-To store the response, we use either JSON or plain text (plain text is enough in this project, but can be customized easily.
+To store the response, we use either JSON or plain text (plain text is enough in this project, but can be customized easily).
 The TTL is set up from settings.redis_ttl_seconds, the default is 3600 seconds = 1 hour.
 Lets us analyze the code:
  • def _make_key - used to create the keys to memorize for the queries; given they are made of strings (possibly long),
@@ -279,11 +279,30 @@ SEMATIC.PY
 This is the second cache layer, after the statis exact cache through Redis, using Chroma.
  The concept is very similar, although, we work on sematic similarity, rather than exact match,
   still aimed at saving tokens and optimizing latency.
-About Embedding Fuctions: Embeddings are numeric representations of your data that capture meaning in a form AI models
+About Embedding Functions: Embeddings are numeric representations of your data that capture meaning in a form AI models
   can work with. They can represent text, images, and eventually audio and video.
  Chroma stores and indexes embeddings so you can efficiently search for similar content.
  You can generate them locally with an installed library or remotely through an API.
- Embedding functions can be linked to a collection and used whenever you call add, update, upsert or query (see docs.chroma).
+ Embedding functions can be linked to a collection and used whenever you call add.
+Some notes about this file
+ • Class Initialization:
+   ○ chromadb.PersistentClient - makes so that the client stores data on the disk and, if the directory does not exist, it creates it locally.
+   ○ self.collection - creates or returns (if existing) a collection named "semantic_cache" with key???????
+      and a value related to the cosine similarity (using L2 distance, which is pretty standard, but can be customized or further refined
+   ○ SentenceTransformer - loads from cache the model to use for the semantic search (downloads it locally the first time);
+   ○ decode_responses=True - means that ?????
+   ○ self._insert_counter - sets a counter that gets increased by one every time that we add a new semantic cache entry (see async def add),
+      useful to check size, in case, and evict, meaning removing data from a temporary, fast-access memory area,
+      like a cache or session state, to free up space.
+ • def _get_embedding - generates the embedding: encode returns a numpy array of floats, which then get converted into a list,
+     which is what Chroma expects. Logging only at DEBUG level.
+ • async def get - given a query and a context, performs the similarity search (we set up before the cosine method): operates in three steps:
+    1. Creates an embedding from the given query+context
+    2. collection.query(query_embeddings=[...], n_results=1) - Chroma returns the single (n_results=1) most similar result,
+        comprehensive of its metadata (where response is and the original query) and distance (result of the 1 - cosine similarity,
+        hence similarity = 1 - distance)
+    3. if the similarity is greater of equal than the similarity_threshold, we return the cached query, saved in local memory
+    4.
 
 
 

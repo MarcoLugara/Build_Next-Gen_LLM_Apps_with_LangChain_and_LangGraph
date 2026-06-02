@@ -276,3 +276,39 @@ REMARK: FastAPI: FastAPI is a modern Python web framework for building APIs and 
   (good for dev environments) can be easily and smoothly swapped for a distributed vector DB, depending on needs, budgets and project needs.
 
 SEMATIC.PY
+This is the second cache layer, after the statis exact cache through Redis, using Chroma.
+ The concept is very similar, although, we work on sematic similarity, rather than exact match,
+  still aimed at saving tokens and optimizing latency.
+About Embedding Fuctions: Embeddings are numeric representations of your data that capture meaning in a form AI models
+  can work with. They can represent text, images, and eventually audio and video.
+ Chroma stores and indexes embeddings so you can efficiently search for similar content.
+ You can generate them locally with an installed library or remotely through an API.
+ Embedding functions can be linked to a collection and used whenever you call add, update, upsert or query (see docs.chroma).
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

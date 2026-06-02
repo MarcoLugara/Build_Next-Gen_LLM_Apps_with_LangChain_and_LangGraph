@@ -1,12 +1,12 @@
 # app/cache/semantic.py
 
-import uuid
-import time
+import uuid   #to generate unique IDs for ech sematic cache entry
+import time   #to implement the LastRecentlyUsed (LRU) logic
 from typing import Optional, Tuple
-import chromadb
-from sentence_transformers import SentenceTransformer
-from loguru import logger
-import redis.asyncio as redis
+import chromadb   #our vector DB client (replaceable for scalability)
+from sentence_transformers import SentenceTransformer  #local embedding model for the sematic cache
+from loguru import logger  #structured logging
+import redis.asyncio as redis   #used for the LRU-coordination
 
 from app.config import settings
 

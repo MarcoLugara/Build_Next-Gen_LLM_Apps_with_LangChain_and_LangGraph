@@ -3,7 +3,8 @@
 import hashlib                   #For SHA256 hashing
 from typing import Optional
 import redis.asyncio as redis    #Async Redis client
-from loguru import logger        #Structured logging
+from loguru import logger
+
 from app.config import settings  #see config.py
 
 

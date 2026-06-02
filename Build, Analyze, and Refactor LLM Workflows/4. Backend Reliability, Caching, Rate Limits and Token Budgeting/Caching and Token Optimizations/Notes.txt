@@ -209,7 +209,7 @@ A complete example, used in our project is in models.py. In this file, we define
   to then feed our semantic proxy cache Chroma build.
 
 
-CACHE/EXACT.PY
+CACHE/EXACT.PY • END FOCUS ON FASTAPI
 This file defines the exact cache (Redis) implementation. This is the first cache layer,
   that will hit once the same question is repeated; in this case, the previous response is recycled, and, therefore,
   no LLM tokens (no cost) are used and the latency is critically reduced (~10ms).
@@ -230,7 +230,49 @@ To store the response, we use either JSON or plain text (plain text is enough in
 The TTL is set up from settings.redis_ttl_seconds, the default is 3600 seconds = 1 hour.
 Lets us analyze the code:
  • def _make_key - used to create the keys to memorize for the queries; given they are made of strings (possibly long),
-    we convert them to a fixed 54-char hex string (memory cost-efficient).
+    we convert them to a fixed 64-char hex string (memory cost-efficient).
+    We use a prefix "chat:*" in order to logically group the exact caches from other instances (for exmaplke semantic caches) or other keys.
+    Moreover; if we add keys in the future, this setup will NOT make them collide with the exact caches ones,
+    it will be needed to use another prefix in case (e.g. session:xyz789, key for user sessions, or,
+    rate_limit:user:42, key for rate limiting for users). Lastly, this allows us to edit them or act with them,
+    using them as a group: for example, we can delete them all at once, using the prefix; we can add other prefix levels,
+    for example, chat:development:..., chat:quality:..., chat:production:...; it allows us to read them better,
+    as the prefix will indicate whoever is auditing the code what are the keys about.
  • async def get - tool to retrieve with cache: it retrieves cached response for exact query+context and returns a
     response string if cache hit and None otherwise.
-    We note that logger.DEBUG - means that we log at DEBUG level, hence visible only when LOG_LEVEL = DEBUG.
+    We note that - logger.DEBUG - means that we log at DEBUG level, hence visible only when LOG_LEVEL = DEBUG.
+ • async def set - tool that stores the response with exact caching, namely stores it with the 64-char hex string key,
+    with its TTL, taken from setting (aka config.py).
+    The response is stored as a plain string (enough for the project), but can be customized to be stored as a JSON output too.
+ • async def delete - tool to manually delete an exact cache entry and returns True if the key existed, and, therefore,
+    has been deleted.
+    This is crucial on the managing of the project, allowing the dev to manually purge entries at will, with the key.
+ • async def stats - returns the precise amount of exact cache stored; as the previous one, great for monitoring.
+    We scan only for keys with our prefix "chat:*", for consistency.
+    We note that this setup is consistent for a relatively small number of keys (~100k keys);
+    for greater amounts it's better to use the logger at INFO level or a separate "manual" counter,
+    this would be less clean as it would not naturally pair up with the TTL expiration setup.
+    This choice with the stats part is good ONLY if we assume the cache rate is small enough,
+    otherwise the run of the stats part could grow linearly, but yet, very fast, if there is a huge amount of users
+    (mind TTL is NOT based on amounts, but on time!); so, it is good to keep this in mind, as a yellow flag, in case of serious scaling.
+    Alternatives (more complex as non-redis native for TTL) are redis INFO (we need to subtract keys from other namespaces (non "chat:*" ones);
+    create a counter, which has to keep into accounts the keys that have been deleted through TTL, as it does NOT trigger a decrement automatically.
+    Still a limitation to keep in mind.
+    REMARK: count=1000 - does NOT mean that it wiull count only up to 1000 keys! It is a HINT to redis on how many keys count for each "round":
+      if there is 50k keys, it will iterate the command 50 times (with 1000 keys each lap), hence making 50 round trips back and forth to Redis.
+     Still, Redis, may do more or less than the exact amount, it is not a rigid contraint.
+     Note that setting the count too slow, means too many Redis round trips, hence very slow; too high count and Redis may have issues
+     while building a huge reply, and, if unlucky, block, creating memory and performace spikes. Generlly, 1000 is a reasonable default.
+ • def __init__(self) - and - async def close - to start or end our connection pool to the FastAPI to Redis.
+REMARK: FastAPI: FastAPI is a modern Python web framework for building APIs and its key features are:
+ • Async: supports async def endpoints, enabling high concurrency (and, therefore, reduced latency);
+ • Pydantic integrations: request/response validation, serialization and documentation;
+ • High perfomance: reduced egenral latency.
+ • Horizontal scaling: allows multiple istances to run on it simultaneously;
+ • Vertical Scaling (more power, CPU/RAM-use, per instance): it can handle thousands of concurrent connections and,
+    with univorn as additional tool, can handle multiple co-workers (tools), where, every worker has a separate process.
+ This whole project is aimed at attacking the principal bottlenecks present in tools existing: LLM calls
+  (expensive as end-month "token bill") and latency optimization, through cache hits. In bigger production projects, Chroma
+  (good for dev environments) can be easily and smoothly swapped for a distributed vector DB, depending on needs, budgets and project needs.
+
+SEMATIC.PY

@@ -44,7 +44,13 @@ class Settings(BaseSettings):
     token_encoder_name: str = Field(default="cl100k_base",
                                    description="tiktoken encoder name")
     reject_on_overflow: bool = Field(default=True,
-                                   description="If True, reject request when prompt exceeds max_prompt_tokens; if False, future extensions")
+                                   description="If True, reject request when prompt exceeds max_prompt_tokens; "
+                                               "if False, future extensions")
+    truncation_strategy: str = Field(default="sliding_window",
+                                     description="Strategy: 'sliding_window' (keep first/last) or 'none'")
+    truncation_keep_start_ratio: float = Field(default=0.6, ge=0.0, le=1.0,
+                                     description="For sliding_window: proportion of tokens to keep from beginning "
+                                                 "(rest from end)")
 
     # Performance
     request_timeout_seconds: float = Field(default=30.0, ge=1.0, description="HTTP timeout for Groq API")

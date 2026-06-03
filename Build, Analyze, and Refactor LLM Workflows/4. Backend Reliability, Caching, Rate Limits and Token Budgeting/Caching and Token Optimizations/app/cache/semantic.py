@@ -43,6 +43,7 @@ class SemanticCache:
         full_text = f"{context}|{query}"
         query_embedding = self._get_embedding(full_text)
 
+        #results will be
         results = self.collection.query(
             query_embeddings=[query_embedding],
             n_results=1,
@@ -114,13 +115,27 @@ class SemanticCache:
     async def stats(self) -> dict:
         chroma_count = self.collection.count()
         redis_count = await self.redis.zcard("semantic_cache:lru")
+
+        # Consistency check
+        if chroma_count != redis_count:
+            logger.warning(
+                f"Inconsistency between Chroma ({chroma_count}) and Redis LRU set ({redis_count}). "
+                f"Difference: {abs(chroma_count - redis_count)} entries. Consider running repair."
+            )
+
         return {
             "semantic_cache_entries_chroma": chroma_count,
             "semantic_cache_entries_redis": redis_count,
             "max_entries": settings.max_semantic_cache_entries,
             "similarity_threshold": settings.similarity_threshold,
+            "consistent": chroma_count == redis_count,  # optional flag
         }
 
-    async def close(self):
+    async def close(self):  #Close Redis and Chroma connections
+        # 1. Close the Redis connection
         await self.redis.close()
         logger.info("SemanticCache Redis connection closed")
+
+        # 2. Close the Chroma client to flush state and release SQLite locks
+        self.chroma_client.close()
+        logger.info("SemanticCache Chroma client connection closed")

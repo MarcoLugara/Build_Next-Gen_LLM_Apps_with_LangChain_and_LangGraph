@@ -3,6 +3,8 @@ GOALS FOR MY PROJECT
 2. Implement advanced token control: dynamic truncation with tiktoken
 3. Use modern tools: FastAPI, Redis, Chroma, tiktoken, LangChain, Docker and deeply understand their roles
 
+========================================================================================================================
+
 SEMANTIC CACHING:
 The traditional caching works as follows:
 • storing exact query → response.
@@ -29,6 +31,8 @@ SEMANTIC CACHING WORKFLOW:
      - Return LLM response
 5. Response includes metadata: cache_hit, tokens_used, tokens_saved, latency_ms
 
+------------------------------------------------------------------------------------------------------------------------
+
 TOKEN CONTROL WORKFLOW:
 • Use tiktoken to accurately count prompt tokens.
 • If token_count > max_prompt_tokens, reject the request immediately with HTTP 400 and a clear error message:
@@ -36,11 +40,15 @@ TOKEN CONTROL WORKFLOW:
 • No truncation is performed. The user is responsible for shortening the prompt.
 • This ensures data integrity and transparency – no silent alteration of the user's input.
 
+------------------------------------------------------------------------------------------------------------------------
+
 ECONOMIC ADVANTAGES:
 1. Cost reduction – Each cache hit saves $0.000X per call; at millions of queries, it's huge.
 2. Latency reduction – 2 seconds → 10ms for repeated/similar questions.
 3. Consistency – Same answer for similar questions (no model drift or slight hallucinations).
 4. Scalability – Cache servers can handle 100x more QPS than LLM endpoints.
+
+========================================================================================================================
 
 NEW TOOLS USED COMPARED TO OLD PROJECTS:
 1. FastAPI:
@@ -55,6 +63,8 @@ NEW TOOLS USED COMPARED TO OLD PROJECTS:
 	Run Redis + Chroma + app with one command – essential for portfolio
 6. LangChain (OLD):
 	Minimal use – only for LLM calls (abstraction to swap models) and embeddings (same embedder as your current system)
+
+========================================================================================================================
 
 TREE STRUCTURE OF THE PROJECT:
 semantic_cache_proxy/
@@ -76,9 +86,12 @@ semantic_cache_proxy/
 ├── .env.example
 └── README.md
 
+========================================================================================================================
+========================================================================================================================
 
-
-EXPLANATIONS OF THE VARIOUS FILES:
+ =====================================
+|| EXPLANATIONS OF THE VARIOUS FILES ||
+ =====================================
 
 REQUIREMENTS.TXT
 We will use 5 categories of tools:
@@ -106,13 +119,14 @@ Additional notes on this file:
     as an approximation for any modern LLM. It counts tokens accurately, allowing us to truncate prompts to stay within Groq's context limit (e.g., 8192 tokens)
 • loguru – Modern logging with structured output, colors, and easy file rotation. We'll replace the standard logging module.
 
+------------------------------------------------------------------------------------------------------------------------
 
 CONFIG.PY
 In any production system, configuration must be separate from code. This allows:
 • Changing settings without modifying code (environment variables, .env file)
 • Running the same code in development, staging, and production
 • Keeping secrets (API keys) out of version control
-1. About Redis (REmote DIctionary Server): we use Redis when a user asks exactly the same question (byte-for-byte same string),
+1. About Redis (REmote Dictionary Server): we use Redis when a user asks exactly the same question (byte-for-byte same string),
      we want to return the cached response in ~10ms without going to Chroma or LLM.
     We use Redis in Docker: redis://localhost:6379 and we put this in config.py, instead of hardcoding, allowing us to switch
      between environments, for example Development and Production, seamlessly, without changing code.
@@ -131,7 +145,7 @@ In any production system, configuration must be separate from code. This allows:
       cached response. Other vector embedding, eventually more powerful, are Qdrant or Pinecone or Weaviate.
      With chroma_persist_directory, it says to Chroma where to store its data to then load it from the given directory; this is consistent
       through restarts. In production, a Docker volume or a mounted permanent disk can be alternatively used. These settings are more easily
-      configurable through the config.py file. The defualt location is a "./chroma_cache" local folder in the project root.
+      configurable through the config.py file. The default location is a "./chroma_cache" local folder in the project root.
      With similarity_threshold, we define the minimum requirement to achieve the cosine similarity hit, therefore the cache hit. Empirically,
       0.92 is the sweet spot for short queries (i.e. customer questions), balancing safety and hit rate. Must be a value between 0.0 and 1.0.
       Other values raise a validation error at startup.
@@ -148,7 +162,7 @@ In any production system, configuration must be separate from code. This allows:
        2c. 3rd strategy; Using more sophisticated tools
          More complex but complete tools can be used intead of Chroma, namely Qdrant (support TTL), Weaving (supports time-based sharding and cleanup),
           Pinecode (can set delete by metadata filter)
-     We used the LRU strategy
+     We used the LRU strategy, with semantic_cache_lru_check_frequency, hence the max amount of entries to be saved into the semantic cache.
      Nonetheless, the vector store can be simply changed later one without changin the logic (abstraction) of the project.
 3. About Token control: once we hit a cache miss (exact and sematic cache check), the LLM is called and the input may contain the User query,
       additional context from the conversation and system instructions. If the total context exceed the mox context window (N tokens for each model),
@@ -184,6 +198,7 @@ In any production system, configuration must be separate from code. This allows:
      It is provided a .env.example dummy file with example values and instructions.
      If no .env file is found, the script simply skips it, no error, and it reads from system environment variables.
 
+------------------------------------------------------------------------------------------------------------------------
 
 MODEL.PY - DEEP DIVE INTO PYDANTIC
 Pydantic is a data validations and settings management library for Python, in particular for:
@@ -191,7 +206,7 @@ Pydantic is a data validations and settings management library for Python, in pa
  • Automatic validation - Raises clear errors when data (types) do not match;
  • Serialization - Converts Python objects to JSON (and back cleanly and effortlessly);
  • Performance - Very fast computing (written in Rust v2);
- • Integration - It is used by FastAPI, LangChain, LangGraph, Hugging Face, etc..
+ • Integration - It is used by FastAPI, LangChain, LangGraph, Hugging Face, etc...
 Useful tools are
  • BaseModel - A base class for creating Pydantic models. Inside this class, items can be more and more customized;
  • Field - Adds metadata and validation constraints to a field beyond its data type (string, int, etc.);
@@ -208,6 +223,7 @@ More classes in the same project can be created, depending on the use we make of
 A complete example, used in our project is in models.py. In this file, we defined the four classes stated above
   to then feed our semantic proxy cache Chroma build.
 
+------------------------------------------------------------------------------------------------------------------------
 
 CACHE/EXACT.PY • END FOCUS ON FASTAPI
 This file defines the exact cache (Redis) implementation. This is the first cache layer,
@@ -275,6 +291,8 @@ REMARK: FastAPI: FastAPI is a modern Python web framework for building APIs and 
   (expensive as end-month "token bill") and latency optimization, through cache hits. In bigger production projects, Chroma
   (good for dev environments) can be easily and smoothly swapped for a distributed vector DB, depending on needs, budgets and project needs.
 
+------------------------------------------------------------------------------------------------------------------------
+
 SEMATIC.PY
 This is the second cache layer, after the statis exact cache through Redis, using Chroma.
  The concept is very similar, although, we work on sematic similarity, rather than exact match,
@@ -287,22 +305,82 @@ About Embedding Functions: Embeddings are numeric representations of your data t
 Some notes about this file
  • Class Initialization:
    ○ chromadb.PersistentClient - makes so that the client stores data on the disk and, if the directory does not exist, it creates it locally.
-   ○ self.collection - creates or returns (if existing) a collection named "semantic_cache" with key???????
-      and a value related to the cosine similarity (using L2 distance, which is pretty standard, but can be customized or further refined
+   ○ self.collection - creates or returns (if existing) a collection named "semantic_cache" and a value related to the cosine similarity,
+      using L2 distance, which is pretty standard, but can be customized or further refined. For Chroma there is NO explicit key prefix,
+      like Redis, but it uses a collection as its namespace: we use "semantic_cache", meanwhile for the LRU,
+      we will use "semantic_cache:lru", which is a proper key name (Redis uses keys, Chroma uses collections).
+      This will keep the logic organized and readable.
    ○ SentenceTransformer - loads from cache the model to use for the semantic search (downloads it locally the first time);
-   ○ decode_responses=True - means that ?????
+   ○ decode_responses=True - means that it decodes the Redis response into UTF-8 format, instead of raw bytes,
+      which would be the result if we do not mention the decoding, as the default is False. This makes sense as our project works with strings,
+      not raw bytes, though, this only restricts it to being able to work with raw byts (scalability concerns, in case)
    ○ self._insert_counter - sets a counter that gets increased by one every time that we add a new semantic cache entry (see async def add),
       useful to check size, in case, and evict, meaning removing data from a temporary, fast-access memory area,
       like a cache or session state, to free up space.
  • def _get_embedding - generates the embedding: encode returns a numpy array of floats, which then get converted into a list,
      which is what Chroma expects. Logging only at DEBUG level.
- • async def get - given a query and a context, performs the similarity search (we set up before the cosine method): operates in three steps:
+ • async def get - search for semantic similarity for an existing query.
+    Given a query and a context, performs the similarity search (we set up before the cosine method): operates in these steps:
     1. Creates an embedding from the given query+context
+   REMARK on CONTEXT: this will be handled in the main.py file. To give a view of it, if a user starts a conversation by saying
+    "I bought a laptop" and, then, saying "What about refunds?", the context would include the previous message too,
+    relative to the current query. Represent history and instructions that should be considered as part of the cache content.
     2. collection.query(query_embeddings=[...], n_results=1) - Chroma returns the single (n_results=1) most similar result,
         comprehensive of its metadata (where response is and the original query) and distance (result of the 1 - cosine similarity,
         hence similarity = 1 - distance)
-    3. if the similarity is greater of equal than the similarity_threshold, we return the cached query, saved in local memory
-    4.
+    3. if the similarity is greater of equal than the similarity_threshold, we return the cached query, saved in local memory.
+       REMARK ON RESULTS: results, given from Chroma's collection.query(...) is a nested list, which can be generalized to far more complex
+        results (matrix, namely results['metadatas'][query n°][result n° for that query]); in our case, we have only one query and
+        one result for the single query, hence we do simply results['metadatas'][0][0].
+    4. await self.redis.zadd - will update the timestamp and doc_id information about the semantic cache hit
+       REMARK ON ZADD: zadd adds or updates a member in a Redis sorted set with a new score, called timestamp, we use it to track LRU order.
+    5. it returns a triplet tuple made of (response, cached_query, similarity), so we know what has been matched with the current query,
+        in cache we have a semantic cache hit.
+ • async def add - to add and store a new (query, response) to our sematic cache, with LRU tracking.
+    Once again, as for the search, we divide this tool in different steps:
+    1. full_text - we create the tuple of context & query
+    2. embedding - we create the relative embedding (to be fed to the similarity search algorithm);
+    3. doc_id - we attach to the entry a unique identifier, that we call doc_id;
+    4. self.collection.add - we store it into Chroma, with its id, embedding and metadata (query&response&creation time);
+    5. with zadd (see above for details), we add the LRU information to Redis, it will be the creation time in this case;
+    6. self._insert_counter += 1 - we increase by one the counter for the times we used that sematic cache;
+    7. semantic_cache_lru_check_frequency - we check if we reached the max amount of semantic cache to keep in memory
+         (limit=max_semantic_cache_entries, adjustable in config.py); if the number of entries is greater than the max we decided to allow,
+         we call the method _evict_if_needed, which we explain in the next paragraph, which checks the LRU times and
+         deletes the oldest entries into our semantic DB, so that we stay below the agreed limit (max_semantic_cache_entries).
+        Lastly, we reset the counter, so that we can re-check and, eventually, re-purge the DB after an other N entries added.
+    8. logger.debug - lastly, we add, at debug level, the log of what we did.
+ • async def _evict_if_needed - we define the method to delete all the oldest (LRU-wise) entries, so that we have at most
+     max_semantic_cache_entries-entries into our semantic cache DB.
+    In terms of logs, we keep:
+    ○ the before-deleting semantic cache size, the number of entries deleted and the resulting sematic cache DB size at INFO level;
+    ○ which semantic cache entries we delete (exact doc_id identification) at DEBUG level;
+    ○ which semantic cache entry (doc_id) has NOT been able to be deleted and the specific Exception (error) text.
+    REMARK ON ZPOPMIN: this command removes and returns the member(s) with the smalled "score" from a generic Redis set.
+     If the score is computed by timestamps, the smallest means the oldest. This method is called "atomic",
+      meaning the removal and return of the parsed and edited solution is done with the same command.
+     In our case - popped = await self.redis.zpopmin("semantic_cache:lru", count=1) - will return a list of tuples,
+      made of (member, score).
+    REMARK ON THE VARIABLE POPPER: we store the deleted tuples in the variable "popper"; the if check is a safety check:
+      if the popped variable is empty, it means an other process or a manual operation already edited the set and
+      the loop breaks safely, returning a empty list. (if not popped - means - if popped is (an) empty (list)).
+     An other thing to note is that, on the uniqueness side, we are safe: zpopmim would delete identical value, in case
+      of multiple entries with the oldest score;in out code this does NOT happen, as we are using timestamps, so that's ok.
+     Semantically, the variable name "popped" is reasonable, as .pop() is a Chroma-standard method to delete entries
+      from collections during data processing.
+    REMARK ON ZCARD: this acting like the cardinality operation in a given set ans returns an integer of
+      how many members are present in a ordered set. In our case, we use it to count the size of our current semantic cache
+      and to compare it with "max_semantic_cache_entries", in order to decide if the eviction process is needed
+      ("collection.delete"). In this case, zcard would give the same result as using collection.count() (in Chroma)
+ • async def stats - returns us semantic cache statistics, in particular: the number of documents in the Croma collection,
+     the number of entries in the Redis-LRU recording (those two should match, if the counting is consistent); if they do not match,
+     we raise an Error and detail what is missing where, to be able to then assess the problem and question Chroma and Redis.
+    It returns a dictionary with all the information's about Redis, Chroma or, in case, the errors found across the two DBs.
+ • async def close - Closes the Redis connection.
+    REMARK: WE DO NOT CLOSE CHROMA: Chroma client does NOT require explicit closing, it is safe ONLY IF, we are working with
+     ephemeral (aka in-memory) clients, otherwise it is CRITICAL to manually close Chroma connection too, to ensure.
+
+------------------------------------------------------------------------------------------------------------------------
 
 
 
@@ -310,6 +388,11 @@ Some notes about this file
 
 
 
+==============================================================================
+GENERAL NOTES AND HEADS-UP FOR LEARNING
+1. In Python a _ (underscore) before a method means that given method is for INTERNAL use only or protected in some way:
+  it signals to other (maybe future) developers and other tools that this method is NOT part of the public API and
+  should NOT be called outside the class
 
 
 

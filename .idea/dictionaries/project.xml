@@ -2,9 +2,14 @@
   <dictionary name="project">
     <words>
       <w>Groq</w>
+      <w>Qdrant</w>
       <w>Uvicorn</w>
       <w>Weaviate</w>
       <w>remote</w>
+      <w>zadd</w>
+      <w>zcard</w>
+      <w>zpopmim</w>
+      <w>zpopmin</w>
     </words>
   </dictionary>
 </component>

@@ -164,6 +164,7 @@ In any production system, configuration must be separate from code. This allows:
           Pinecode (can set delete by metadata filter)
      We used the LRU strategy, with semantic_cache_lru_check_frequency, hence the max amount of entries to be saved into the semantic cache.
      Nonetheless, the vector store can be simply changed later one without changin the logic (abstraction) of the project.
+!!!!!!!!!!!!!!!!!!!!!CHANGE POINT 3 WITH UPDATES. TODO!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 3. About Token control: once we hit a cache miss (exact and sematic cache check), the LLM is called and the input may contain the User query,
       additional context from the conversation and system instructions. If the total context exceed the mox context window (N tokens for each model),
       the LLM may either refuse the request or truncate silently and unexpectedly; this is awful and disingenuous in production. Moreover, sinding long
@@ -383,6 +384,12 @@ Some notes about this file
 ------------------------------------------------------------------------------------------------------------------------
 
 TOKEN_CONTROL.PY
+It manages all token-related operations for prompts, before they are fed to the LLM; in particular it supports two strategies:
+ 1. Alert & Reject: if a prompt exceed the max_prompt_tokens (see config.py), it raises a TokenLimitExceededError Error
+     with a clear message;
+ 2. Truncation (can be extended into different strategies for token control and optimization): if reject_on_overflow = False,
+     it automatically shortens the prompt, keeping only the first X% and the last Y% of tokens, dropping the middle.
+     Good if an answer is always required and we decide not to truncate
 
 
 

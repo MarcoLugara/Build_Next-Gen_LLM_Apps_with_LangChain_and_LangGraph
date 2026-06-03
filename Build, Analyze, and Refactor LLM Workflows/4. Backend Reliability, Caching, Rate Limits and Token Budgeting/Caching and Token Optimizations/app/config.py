@@ -43,11 +43,10 @@ class Settings(BaseSettings):
                                    description="Maximum tokens allowed in prompt (input + context)")
     token_encoder_name: str = Field(default="cl100k_base",
                                    description="tiktoken encoder name")
-    reject_on_overflow: bool = Field(default=True,
-                                   description="If True, reject request when prompt exceeds max_prompt_tokens; "
-                                               "if False, future extensions")
-    truncation_strategy: str = Field(default="sliding_window",
-                                     description="Strategy: 'sliding_window' (keep first/last) or 'none'")
+    overflow_strategy: str = Field(
+        default="reject",
+        description="Strategy when prompt exceeds limit: 'reject', 'truncate_with_warning', 'summarize_overflow' (future)"
+    )
     truncation_keep_start_ratio: float = Field(default=0.6, ge=0.0, le=1.0,
                                      description="For sliding_window: proportion of tokens to keep from beginning "
                                                  "(rest from end)")

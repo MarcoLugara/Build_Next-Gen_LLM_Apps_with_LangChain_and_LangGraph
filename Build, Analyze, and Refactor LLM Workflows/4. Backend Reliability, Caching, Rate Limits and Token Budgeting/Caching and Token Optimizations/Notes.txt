@@ -410,11 +410,12 @@ We go through the code piece by piece
      hence easy customization towards client needs) and token_count, given by tiktoken;
  • class TokenValidator - this class initializes the token validation, meaning it calls the cheap LLM for the summarization,
      setting temperature (at 0.0, fully objective towards the text fed to the LLM), max tokens "max_tokens" for the summarization
-     (we set up the default 512, as an happy medium, but we, as always, make it customizable in config.py)
-     the encoder from config.py and reports that the summarization began with a log at INFO level;
+     (we set up the default 512, as an happy medium, but we, as always, make it customizable in config.py),
+     as well as the tokenizer and summarization model (MUST be the same, see config.py), last,
+     reports when the summarization began with a log at INFO level;
  • def count_tokens - the function returning the token count
  • def _truncate_sliding_window - this works as follows:
-     ○ we used the computed number of tokens and, if the token count is below the limit we chose in config.py,
+     ○ we take the computed number of tokens and, if the token count is below the limit we chose in config.py,
         namely "max_prompt_tokens", we close the cycle and specify that we did NOT truncate anything and
         return everything unchanged; otherwise, we move on;
      ○ we count the token to keep both from the beginning and the end and rewrite the prompt as truncated_tokens, last,
@@ -423,12 +424,32 @@ We go through the code piece by piece
      ○ lastly, we return the truncated prompt and its metadata (if we truncated, token count before truncation,
         token count after truncation, strategy used in TokenValidation and a clear warning message (if we truncated).
  • async def _summarize_overflow - this works as follows:
-     ○ we used the computed number of tokens and, if the token count is below the limit we chose in config.py,
+     ○ we take the computed number of tokens and, if the token count is below the limit we chose in config.py,
         namely "max_prompt_tokens", we close the cycle and specify that we did NOT truncate anything and
         return everything unchanged; otherwise, we move on (as per the truncation method);
-     ○
-     ○
-     ○
+     ○ we keep the first "keep_tokens" and classify the latter as "overflow_tokens", last we decode them back into string (text);
+     ○ we invoke the weak LLm prompting a under 200 word summary of the "overflow_tokens"'s text,
+        decode it back into string (text) and save it as "summary". Hence our prompt will be:
+        processed_prompt = kept_part + marker that summarized content starts + summary
+     ○ we count the token for the new processed_prompt (for completeness)
+     ○ last, we log the result at INFO level, the processed_prompt and its metadata (if we did the _summarize_overflow,
+        original token count, new token count, name of strategy used and a clear warning message (if we summarized).
+        Consistent and similar to the truncation case.
+ • async def prepare_prompt - single entry point that, given any strategy or method used, just returns
+     (processed_prompt, metadata), where, of course, the metadata depends on the strategy used. This works as follows:
+     ○ we take the computed number of tokens and, if the token count is below the limit we chose in config.py,
+        namely "max_prompt_tokens", we close the cycle and specify that we did NOT truncate anything and
+        return everything unchanged; otherwise, we move on;
+     ○ depending on the strategy used (if-elif paragraph), we return the correct prompt and metadata
+     ○ if the strategy used does NOT exist, simply returns Reject and raises an Exception
+        (no silent ignores and clear error messages)
+ REMARK: TOKENIZER: The tokenizer is a Hugging Face AutoTokenizer loaded from settings.tokenizer_model_name.
+  For consistency, it HAS TO BE the same used by the summarizer and (better even) the same tokenizer used by the main LLM
+  (maybe a lighter version), because different models tokenize the same text differently.
+  This allows the given LLM to see the exact token count (in its metric).
+  We note that the tokenizer gives you the ONLY accurate (and objective for the give LLM) way to count.
+  It is crucial to note that token is NOT equal work, for example, for some models, “hello” might be one,
+  “hello world” might be two but “helloworld” could be three.
 
 
 

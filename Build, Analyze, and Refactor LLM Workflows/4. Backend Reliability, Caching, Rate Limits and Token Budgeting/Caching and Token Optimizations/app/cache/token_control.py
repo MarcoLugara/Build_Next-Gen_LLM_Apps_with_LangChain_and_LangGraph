@@ -1,12 +1,12 @@
 # app/cache/token_control.py
 
-import transformers
+
 from langchain_groq import ChatGroq #Used for the LLM summarization (cheap model)
 from langchain_core.messages import HumanMessage  #Standard LangChain message format, allows customization
                                         #lanchain_core handles (backbone) message interactions between human and LLM
 from loguru import logger
 from app.config import settings
-
+from transformers import PreTrainedTokenizer, AutoTokenizer
 
 class TokenLimitExceededError(Exception):
     def __init__(self, token_count: int, max_tokens: int):
@@ -16,8 +16,11 @@ class TokenLimitExceededError(Exception):
 
 
 class TokenValidator:
+    tokenizer: PreTrainedTokenizer
+
     def __init__(self):
-        self.tokenizer = transformers.AutoTokenizer.from_pretrained(settings.tokenizer_model_name)
+        # noinspection PyTypeChecker,PyNoneFunctionAssignment
+        self.tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(settings.tokenizer_model_name)
         logger.info(f"TokenValidator initialised with tokenizer: {settings.tokenizer_model_name}")
 
         self.summarizer_llm = ChatGroq(
@@ -27,7 +30,7 @@ class TokenValidator:
             max_tokens=settings.summarization_max_tokens,
             timeout=settings.request_timeout_seconds,
         )
-        logger.info(f"Summarisation LLM initialised with model: {settings.summarization_model}")
+        logger.info(f"Summarization LLM initialised with model: {settings.summarization_model}")
 
     def count_tokens(self, text: str) -> int:
         return len(self.tokenizer.encode(text))
@@ -64,7 +67,8 @@ class TokenValidator:
         overflow_tokens = tokens[keep_tokens:]
 
         overflow_text = self.tokenizer.decode(overflow_tokens)
-        summarise_prompt = f"Summarise the following text concisely, preserving key facts and information. Keep the summary under {settings.summarization_max_tokens} tokens.\n\nText:\n{overflow_text}"
+        summarise_prompt = (f"Summarise the following text concisely, preserving key facts and information. "
+                            f"Keep the summary under {settings.summarization_max_tokens} tokens.\n\nText:\n{overflow_text}")
         messages = [HumanMessage(content=summarise_prompt)]
         response = await self.summarizer_llm.ainvoke(messages)
         summary = response.content.strip()
@@ -73,7 +77,8 @@ class TokenValidator:
         processed_prompt = f"{kept_part}\n\n[Summary of omitted content]: {summary}"
 
         processed_tokens = self.count_tokens(processed_prompt)
-        logger.info(f"Summarised overflow: original {original_tokens} tokens, kept {keep_tokens} tokens, summary added -> new total {processed_tokens} tokens")
+        logger.info(f"Summarised overflow: original {original_tokens} tokens, kept {keep_tokens} tokens, "
+                    f"summary added -> new total {processed_tokens} tokens")
 
         return processed_prompt, {
             "truncated": True,
@@ -88,7 +93,7 @@ class TokenValidator:
         if token_count <= settings.max_prompt_tokens:
             return prompt, {"truncated": False, "original_token_count": token_count}
 
-        strategy = settings.overflow_strategy
+        strategy = settings.token_control_strategy
         if strategy == "reject":
             logger.warning(f"Token limit exceeded: {token_count} > {settings.max_prompt_tokens} – rejecting")
             raise TokenLimitExceededError(token_count, settings.max_prompt_tokens)

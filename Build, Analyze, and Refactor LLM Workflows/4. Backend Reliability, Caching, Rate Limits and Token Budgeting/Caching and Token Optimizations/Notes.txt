@@ -303,7 +303,7 @@ About Embedding Functions: Embeddings are numeric representations of your data t
  Chroma stores and indexes embeddings so you can efficiently search for similar content.
  You can generate them locally with an installed library or remotely through an API.
  Embedding functions can be linked to a collection and used whenever you call add.
-Some notes about this file
+Some notes about this file:
  • Class Initialization:
    ○ chromadb.PersistentClient - makes so that the client stores data on the disk and, if the directory does not exist, it creates it locally.
    ○ self.collection - creates or returns (if existing) a collection named "semantic_cache" and a value related to the cosine similarity,
@@ -404,7 +404,7 @@ REMARK-DEEP DIVE ON THE LANCHAIN IMPORTS: We import two langchain modules we hav
       • ChatMessage - generic class that can represent any type of message (user, AI, or system),
           used to manage conversations that are made of any between user, LLM or system altogether;
       • ToolMessage - a class used to interact with external tools, like APIs and DBs;
-We go through the code piece by piece
+We go through the code piece by piece:
  • class TokenLimitExceededError - this class defines the behavior in case of a Token Count Exceeding error,
      providing a clear Error message, comparing max_tokens (we will use the value set up in config.py,
      hence easy customization towards client needs) and token_count, given by tiktoken;
@@ -450,6 +450,28 @@ We go through the code piece by piece
   We note that the tokenizer gives you the ONLY accurate (and objective for the give LLM) way to count.
   It is crucial to note that token is NOT equal work, for example, for some models, “hello” might be one,
   “hello world” might be two but “helloworld” could be three.
+
+------------------------------------------------------------------------------------------------------------------------
+
+LLM_CLIENT.PY
+This script is the pure LLM caller that communicates with the given LLM (we chose Groq for this example, though,
+  easily customizable, if the wanted model supports our tool, see "GENERAL NOTES AND HEADS-UP FOR LEARNING").
+ The script assumes the prompt is already correctly edited to meet all token constraints (see token_control.py) and,
+  given a prompt string, through a retry logic, for robustness and handling possible errors, responds with a string.
+ We separate the three parts, to make it easily scalable and customizable (for example switching LLM) and
+  completely independent of the cache and token logics, handled respectively in exact.py & semantic.py and token_control.py.
+ The main import tool we heavily use is "tenacity", its decorators allow us to, respectively, handle the retry logic with "retry",
+  handle the timeout after X attempts with "stop_after_attempt", handling wait time between attempts,
+  increasing it between each attempt (common practice, even by major cloud providers, as a flood of immediate retries
+  can make the problem worse) with "wait_exponential", retrying under specific conditions with "retry_if_exception_type",
+  raising an error if all the given retry logics fail with "RetryError".
+  The exception types are handled by "httpx".
+Some notes about this file:
+ • class LLMClient:
+
+
+
+!TODO!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Testability: You can mock self.llm.ainvoke in unit tests
 
 
 

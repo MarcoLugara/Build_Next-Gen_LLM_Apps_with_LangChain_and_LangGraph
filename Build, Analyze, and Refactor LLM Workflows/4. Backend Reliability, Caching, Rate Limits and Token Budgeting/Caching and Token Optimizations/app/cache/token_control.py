@@ -1,8 +1,9 @@
 # app/cache/token_control.py
 
 import tiktoken
-from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage
+from langchain_groq import ChatGroq   #Used for the LLM summarization (cheap model)
+from langchain_core.messages import HumanMessage  #Standard LangChain message format, allows customization
+                                        #lanchain_core handles (backbone) message interactions between human and LLM
 from loguru import logger
 from app.config import settings
 

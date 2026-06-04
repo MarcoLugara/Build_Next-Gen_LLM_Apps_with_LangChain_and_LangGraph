@@ -1,6 +1,8 @@
 # app/cache/token_control.py
 
 import tiktoken
+from langchain_groq import ChatGroq
+from langchain_core.messages import HumanMessage
 from loguru import logger
 from app.config import settings
 
@@ -16,6 +18,15 @@ class TokenValidator:
     def __init__(self):
         self.encoder = tiktoken.get_encoding(settings.token_encoder_name)
         logger.info(f"TokenValidator initialised with encoder: {settings.token_encoder_name}")
+
+        self.summarizer_llm = ChatGroq(
+            api_key=settings.groq_api_key,
+            model=settings.summarization_model,
+            temperature=0.0,
+            max_tokens=512,
+            timeout=settings.request_timeout_seconds,
+        )
+        logger.info(f"Summarisation LLM initialised with model: {settings.summarization_model}")
 
     def count_tokens(self, text: str) -> int:
         return len(self.encoder.encode(text))
@@ -41,7 +52,37 @@ class TokenValidator:
             "warning": "Prompt was automatically truncated: the middle part was removed to fit token limit."
         }
 
-    def prepare_prompt(self, prompt: str) -> tuple[str, dict]:
+    async def _summarize_overflow(self, prompt: str) -> tuple[str, dict]:
+        original_tokens = self.count_tokens(prompt)
+        if original_tokens <= settings.max_prompt_tokens:
+            return prompt, {"truncated": False, "original_token_count": original_tokens}
+
+        keep_tokens = int(settings.max_prompt_tokens * 0.7)
+        tokens = self.encoder.encode(prompt)
+        kept_tokens = tokens[:keep_tokens]
+        overflow_tokens = tokens[keep_tokens:]
+
+        overflow_text = self.encoder.decode(overflow_tokens)
+        summarise_prompt = f"Summarise the following text concisely, preserving key facts and information. Keep the summary under 200 words.\n\nText:\n{overflow_text}"
+        messages = [HumanMessage(content=summarise_prompt)]
+        response = await self.summarizer_llm.ainvoke(messages)
+        summary = response.content.strip()
+
+        kept_part = self.encoder.decode(kept_tokens)
+        processed_prompt = f"{kept_part}\n\n[Summary of omitted content]: {summary}"
+
+        processed_tokens = self.count_tokens(processed_prompt)
+        logger.info(f"Summarised overflow: original {original_tokens} tokens, kept {keep_tokens} tokens, summary added -> new total {processed_tokens} tokens")
+
+        return processed_prompt, {
+            "truncated": True,
+            "original_token_count": original_tokens,
+            "truncated_token_count": processed_tokens,
+            "strategy": "summarize_overflow",
+            "warning": "Prompt exceeded token limit. The overflow part was summarised and prepended to the kept content."
+        }
+
+    async def prepare_prompt(self, prompt: str) -> tuple[str, dict]:
         token_count = self.count_tokens(prompt)
         if token_count <= settings.max_prompt_tokens:
             return prompt, {"truncated": False, "original_token_count": token_count}
@@ -52,6 +93,8 @@ class TokenValidator:
             raise TokenLimitExceededError(token_count, settings.max_prompt_tokens)
         elif strategy == "truncate_with_warning":
             return self._truncate_sliding_window(prompt)
+        elif strategy == "summarize_overflow":
+            return await self._summarize_overflow(prompt)
         else:
             logger.warning(f"Unknown overflow strategy '{strategy}', falling back to 'reject'")
             raise TokenLimitExceededError(token_count, settings.max_prompt_tokens)

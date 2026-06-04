@@ -384,12 +384,16 @@ Some notes about this file
 ------------------------------------------------------------------------------------------------------------------------
 
 TOKEN_CONTROL.PY
-It manages all token-related operations for prompts, before they are fed to the LLM; in particular it supports two strategies:
- 1. Alert & Reject: if a prompt exceed the max_prompt_tokens (see config.py), it raises a TokenLimitExceededError Error
+It manages all token-related operations for prompts, before they are fed to the LLM;
+ in particular it supports these strategies, depending on the method chosen in settings.overflow_strategy, from config.py.
+ 1. reject - Alert & Reject: if a prompt exceed the max_prompt_tokens (see config.py), it raises a TokenLimitExceededError Error
      with a clear message;
- 2. Truncation (can be extended into different strategies for token control and optimization): if reject_on_overflow = False,
-     it automatically shortens the prompt, keeping only the first X% and the last Y% of tokens, dropping the middle.
-     Good if an answer is always required and we decide not to truncate
+ 2. truncate_with_warning - Truncation with warning: it automatically shortens the prompt, keeping only the first X% and the last Y% of tokens,
+     dropping the middle. Good if an answer is always required, despite the cost of risking losing context.
+     Returns metadata containing clear warning messages telling that the prompt was altered;
+ 3. summarize_overflow - Keeps part of the prompt (X% of the allowed limit, in terms of tokens), and sends the remaining
+     part (the overflow) to a cheap LLM for it to be summarized. The summary is then prepared to be used.
+     A log at warning level is therefore produced (TO USER????????? !TODO!)
 
 
 
@@ -398,10 +402,13 @@ It manages all token-related operations for prompts, before they are fed to the 
 
 ==============================================================================
 GENERAL NOTES AND HEADS-UP FOR LEARNING
-1. In Python a _ (underscore) before a method means that given method is for INTERNAL use only or protected in some way:
-  it signals to other (maybe future) developers and other tools that this method is NOT part of the public API and
-  should NOT be called outside the class
-
+1. UNDERSCORE BEFORE METHODS/FUNCTIONS IN PYTHON.
+    In Python a _ (underscore) before a method means that given method is for INTERNAL use only or protected in some way:
+     it signals to other (maybe future) developers and other tools that this method is NOT part of the public API and
+     should NOT be called outside the class
+2. SELF
+    We use self.XXXX many times in our project, it is worth to write a detailed explanation of its features.
+    TODO!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 
 

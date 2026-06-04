@@ -1,7 +1,7 @@
 # app/cache/token_control.py
 
-import tiktoken
-from langchain_groq import ChatGroq   #Used for the LLM summarization (cheap model)
+import transformers
+from langchain_groq import ChatGroq #Used for the LLM summarization (cheap model)
 from langchain_core.messages import HumanMessage  #Standard LangChain message format, allows customization
                                         #lanchain_core handles (backbone) message interactions between human and LLM
 from loguru import logger
@@ -17,8 +17,8 @@ class TokenLimitExceededError(Exception):
 
 class TokenValidator:
     def __init__(self):
-        self.encoder = tiktoken.get_encoding(settings.token_encoder_name)
-        logger.info(f"TokenValidator initialised with encoder: {settings.token_encoder_name}")
+        self.tokenizer = transformers.AutoTokenizer.from_pretrained(settings.tokenizer_model_name)
+        logger.info(f"TokenValidator initialised with tokenizer: {settings.tokenizer_model_name}")
 
         self.summarizer_llm = ChatGroq(
             api_key=settings.groq_api_key,
@@ -30,7 +30,7 @@ class TokenValidator:
         logger.info(f"Summarisation LLM initialised with model: {settings.summarization_model}")
 
     def count_tokens(self, text: str) -> int:
-        return len(self.encoder.encode(text))
+        return len(self.tokenizer.encode(text))
 
     def _truncate_sliding_window(self, prompt: str) -> tuple[str, dict]:
         original_tokens = self.count_tokens(prompt)
@@ -39,9 +39,9 @@ class TokenValidator:
 
         keep_start = int(settings.max_prompt_tokens * settings.truncation_keep_start_ratio)
         keep_end = settings.max_prompt_tokens - keep_start
-        tokens = self.encoder.encode(prompt)
+        tokens = self.tokenizer.encode(prompt)
         truncated_tokens = tokens[:keep_start] + (tokens[-keep_end:] if keep_end > 0 else [])
-        truncated_prompt = self.encoder.decode(truncated_tokens)
+        truncated_prompt = self.tokenizer.decode(truncated_tokens)
         truncated_count = len(truncated_tokens)
 
         logger.info(f"Truncated prompt from {original_tokens} to {truncated_count} tokens (sliding_window)")
@@ -58,18 +58,18 @@ class TokenValidator:
         if original_tokens <= settings.max_prompt_tokens:
             return prompt, {"truncated": False, "original_token_count": original_tokens}
 
-        keep_tokens = int(settings.max_prompt_tokens * 0.7)
-        tokens = self.encoder.encode(prompt)
+        keep_tokens = int(settings.max_prompt_tokens * settings.summarization_keep_ratio)
+        tokens = self.tokenizer.encode(prompt)
         kept_tokens = tokens[:keep_tokens]
         overflow_tokens = tokens[keep_tokens:]
 
-        overflow_text = self.encoder.decode(overflow_tokens)
+        overflow_text = self.tokenizer.decode(overflow_tokens)
         summarise_prompt = f"Summarise the following text concisely, preserving key facts and information. Keep the summary under {settings.summarization_max_tokens} tokens.\n\nText:\n{overflow_text}"
         messages = [HumanMessage(content=summarise_prompt)]
         response = await self.summarizer_llm.ainvoke(messages)
         summary = response.content.strip()
 
-        kept_part = self.encoder.decode(kept_tokens)
+        kept_part = self.tokenizer.decode(kept_tokens)
         processed_prompt = f"{kept_part}\n\n[Summary of omitted content]: {summary}"
 
         processed_tokens = self.count_tokens(processed_prompt)

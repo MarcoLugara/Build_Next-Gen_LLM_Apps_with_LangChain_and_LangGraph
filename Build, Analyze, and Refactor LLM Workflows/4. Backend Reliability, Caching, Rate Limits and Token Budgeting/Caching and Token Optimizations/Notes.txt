@@ -409,7 +409,26 @@ We go through the code piece by piece
      providing a clear Error message, comparing max_tokens (we will use the value set up in config.py,
      hence easy customization towards client needs) and token_count, given by tiktoken;
  • class TokenValidator - this class initializes the token validation, meaning it calls the cheap LLM for the summarization,
-     setting temperature (at 0.0, fully objective towards the text fed to the LLM), max tokens for the summarization (we set up 512 in order to keep the summarization short enough, the encoder from config.py and reports that the summarization began with a log at INFO level.
+     setting temperature (at 0.0, fully objective towards the text fed to the LLM), max tokens "max_tokens" for the summarization
+     (we set up the default 512, as an happy medium, but we, as always, make it customizable in config.py)
+     the encoder from config.py and reports that the summarization began with a log at INFO level;
+ • def count_tokens - the function returning the token count
+ • def _truncate_sliding_window - this works as follows:
+     ○ we used the computed number of tokens and, if the token count is below the limit we chose in config.py,
+        namely "max_prompt_tokens", we close the cycle and specify that we did NOT truncate anything and
+        return everything unchanged; otherwise, we move on;
+     ○ we count the token to keep both from the beginning and the end and rewrite the prompt as truncated_tokens, last,
+        we decode (reconvert) back it into a string and count the truncated tokens with "truncated_count";
+     ○ we log the truncation at INFO level, making it visible;
+     ○ lastly, we return the truncated prompt and its metadata (if we truncated, token count before truncation,
+        token count after truncation, strategy used in TokenValidation and a clear warning message (if we truncated).
+ • async def _summarize_overflow - this works as follows:
+     ○ we used the computed number of tokens and, if the token count is below the limit we chose in config.py,
+        namely "max_prompt_tokens", we close the cycle and specify that we did NOT truncate anything and
+        return everything unchanged; otherwise, we move on (as per the truncation method);
+     ○
+     ○
+     ○
 
 
 
@@ -426,7 +445,9 @@ GENERAL NOTES AND HEADS-UP FOR LEARNING
 2. SELF
     We use self.XXXX many times in our project, it is worth to write a detailed explanation of its features.
     TODO!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
+3. MODEL MATCHING BETWEEN TOKENIZER AND SUMMARIZATION
+    TODO!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    4.
 
 
 

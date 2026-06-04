@@ -41,11 +41,11 @@ class Settings(BaseSettings):
     # Token control
     max_prompt_tokens: int = Field(default=7000, ge=100,
                                    description="Maximum tokens allowed in prompt (input + context)")
-    token_encoder_name: str = Field(default="cl100k_base",
-                                   description="tiktoken encoder name")
+    tokenizer_model_name: str = Field(default="meta-llama/Meta-Llama-3-8B-Instruct",
+                                      description="Hugging Face model name for tokenizer (!MUST! match the LLM used)")
     overflow_strategy: str = Field(
         default="reject",
-        description="Strategy when prompt exceeds limit: 'reject', 'truncate_with_warning', 'summarize_overflow' (future)"
+        description="Strategy: 'reject', 'truncate_with_warning', 'summarize_overflow'"
     )
     truncation_keep_start_ratio: float = Field(default=0.6, ge=0.0, le=1.0,
                                    description="For sliding_window: proportion of tokens to keep from beginning "
@@ -54,6 +54,9 @@ class Settings(BaseSettings):
                                    description="Model used for summarization when overflow_strategy='summarize_overflow'")
     summarization_max_tokens: int = Field(default=512, ge=1,
                                    description="Max tokens for summary output")
+    summarization_keep_ratio: float = Field(default=0.7, ge=0.0, le=1.0,
+                                   description="For summarize_overflow: proportion of allowed tokens to keep from beginning "
+                                               "(rest summarised)")
 
     # Performance
     request_timeout_seconds: float = Field(default=30.0, ge=1.0,

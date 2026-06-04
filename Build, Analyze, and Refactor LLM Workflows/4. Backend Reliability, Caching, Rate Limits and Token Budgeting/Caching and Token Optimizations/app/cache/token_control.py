@@ -23,7 +23,7 @@ class TokenValidator:
             api_key=settings.groq_api_key,
             model=settings.summarization_model,
             temperature=0.0,
-            max_tokens=512,
+            max_tokens=settings.summarization_max_tokens,
             timeout=settings.request_timeout_seconds,
         )
         logger.info(f"Summarisation LLM initialised with model: {settings.summarization_model}")
@@ -63,7 +63,7 @@ class TokenValidator:
         overflow_tokens = tokens[keep_tokens:]
 
         overflow_text = self.encoder.decode(overflow_tokens)
-        summarise_prompt = f"Summarise the following text concisely, preserving key facts and information. Keep the summary under 200 words.\n\nText:\n{overflow_text}"
+        summarise_prompt = f"Summarise the following text concisely, preserving key facts and information. Keep the summary under {settings.summarization_max_tokens} tokens.\n\nText:\n{overflow_text}"
         messages = [HumanMessage(content=summarise_prompt)]
         response = await self.summarizer_llm.ainvoke(messages)
         summary = response.content.strip()

@@ -394,6 +394,23 @@ It manages all token-related operations for prompts, before they are fed to the 
  3. summarize_overflow - Keeps part of the prompt (X% of the allowed limit, in terms of tokens), and sends the remaining
      part (the overflow) to a cheap LLM for it to be summarized. The summary is then prepared to be used.
      A log at warning level is therefore produced (TO USER????????? !TODO!)
+REMARK-DEEP DIVE ON THE LANCHAIN IMPORTS: We import two langchain modules we have not used before:
+ 1. "langchain_groq" - the LangChain wrapper for Groq's LLM, used only for the summarization part in the summarize_overflow strategy;
+ 2. "langchain_core.messages" - which provides classes that manage the fow of messages between user and LLM,
+      serving as backbone for the conversation. The main classes are:
+      • HumanMessage - (the one we use), represents messages sent from user to LLM and allows customization of query,
+          context and, optionally, metadata;
+      • SystemMessage - defines instructions, like behavior, for the LLM (e.g. "You are an HR assistant";
+      • ChatMessage - generic class that can represent any type of message (user, AI, or system),
+          used to manage conversations that are made of any between user, LLM or system altogether;
+      • ToolMessage - a class used to interact with external tools, like APIs and DBs;
+We go through the code piece by piece
+ • class TokenLimitExceededError - this class defines the behavior in case of a Token Count Exceeding error,
+     providing a clear Error message, comparing max_tokens (we will use the value set up in config.py,
+     hence easy customization towards client needs) and token_count, given by tiktoken;
+ • class TokenValidator - this class initializes the token validation, meaning it calls the cheap LLM for the summarization,
+     setting temperature (at 0.0, fully objective towards the text fed to the LLM), max tokens for the summarization (we set up 512 in order to keep the summarization short enough, the encoder from config.py and reports that the summarization began with a log at INFO level.
+
 
 
 

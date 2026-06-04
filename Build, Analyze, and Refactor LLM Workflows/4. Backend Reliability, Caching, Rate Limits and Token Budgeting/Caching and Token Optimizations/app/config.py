@@ -48,13 +48,20 @@ class Settings(BaseSettings):
         description="Strategy when prompt exceeds limit: 'reject', 'truncate_with_warning', 'summarize_overflow' (future)"
     )
     truncation_keep_start_ratio: float = Field(default=0.6, ge=0.0, le=1.0,
-                                     description="For sliding_window: proportion of tokens to keep from beginning "
+                                   description="For sliding_window: proportion of tokens to keep from beginning "
                                                  "(rest from end)")
+    summarization_model: str = Field(default="llama3-8b-8192",
+                                   description="Model used for summarization when overflow_strategy='summarize_overflow'")
+    summarization_max_tokens: int = Field(default=512, ge=1,
+                                   description="Max tokens for summary output")
 
     # Performance
-    request_timeout_seconds: float = Field(default=30.0, ge=1.0, description="HTTP timeout for Groq API")
-    retry_attempts: int = Field(default=3, ge=0, description="Number of retries on transient LLM failures")
-    retry_backoff_factor: float = Field(default=1.0, ge=0.1, description="Exponential backoff factor")
+    request_timeout_seconds: float = Field(default=30.0, ge=1.0,
+                                   description="HTTP timeout for Groq API")
+    retry_attempts: int = Field(default=3, ge=0,
+                                   description="Number of retries on transient LLM failures")
+    retry_backoff_factor: float = Field(default=1.0, ge=0.1,
+                                   description="Exponential backoff factor")
 
     # Logging
     log_level: str = Field(default="INFO", description="Log level (DEBUG, INFO, WARNING, ERROR)")

@@ -544,15 +544,33 @@ Next, we explain how it works:
  • @app.get("/cache/stats" - returns the current cache size sizes and configuration, useful for monitoring;
  • @app.get("/health") - returns the health check informations we explained before, liveness check for orchestrators.
 
+------------------------------------------------------------------------------------------------------------------------
+
+DOCKER-COMPOSE.YML
+Defines and runs the entire application, using Docker Compose. Docker Compose is a tool used for defining and running
+  multi-container Docker applications. It allows you to configure your application's services, networks,
+  and storage volumes in a single configuration file, then launch everything simultaneously using a single command.
+ It includes:
+  • Redis (exact cache) service - exposes port 6379 internally and uses official Redis image.
+     The Redis is exposed to the host in development,
+  • app - the project we have built until now, about the FastAPI token control and exact&semantic cache proxy.
+     It exposes port 8000 to the host.
+ This setup simplifies local and eventually production development (command "docker-compose up"), ensures consistent
+  setup environments (like Python version, file dependencies or Redis version) and organizes the project.
+ It loads environment variables from .env files, like the API key, ensuring secrecy for the API key for example.
+ It has volumes for Chroma persistent storage, ensuring consistency, even upon restarts.
+  The Docker creates the chroma_cache directory automatically, if not present, ensuring it has write permissions inside.
+ It is important to note that the health check applies only to Redis, given Chroma runs in the container present
+  locally inside the app.
 
 
 
 
 
 
+========================================================================================================================
+========================================================================================================================
 
-
-==============================================================================
 GENERAL NOTES AND HEADS-UP FOR LEARNING
 1. UNDERSCORE BEFORE METHODS/FUNCTIONS IN PYTHON.
     In Python a _ (underscore) before a method means that given method is for INTERNAL use only or protected in some way:

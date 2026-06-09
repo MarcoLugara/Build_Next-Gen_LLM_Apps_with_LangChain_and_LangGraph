@@ -563,9 +563,41 @@ Defines and runs the entire application, using Docker Compose. Docker Compose is
  It is important to note that the health check applies only to Redis, given Chroma runs in the container present
   locally inside the app.
 
+------------------------------------------------------------------------------------------------------------------------
 
+DOCKERFILE
+Creates a lightweight reproducible image for the project, installing system dependencies, setting up a Python
+  environment, copying the application code and installing the necessary packages for the code to run and, lastly,
+  defining the command to run the FastAPI server using univorn.
+ Univorn is a ASGI (Asynchronous Server Gateway Interface) web server, built from the ground up to handle modern,
+  asynchronous (async/await) Python code and frameworks like FastAPI, Starlette or newer versions of Django.
+  It is the backbone environment that boots up a Python project, making it accessible on the internet.
+Concerning security, this file:
+ • copies dependencies and requirements from requirements.txt, caching requirements;
+ • uses curl to do all the health checks described before, for example it can tell Docker: "Every 30 seconds,
+    try to load the website at http://localhost/health. If it loads successfully, the container is healthy. If it fails,
+    mark it as unhealthy.";
+ • runs on four workers, but can be manually adjusted. In Docker, workers mean a separate Python process spawned by
+    Uvicorn to handle incoming HTTP requests concurrently;
+ • writes, through docker-compose.yml, the semantic cache in /app/chroma_cache, a host directory, so that data persists.
 
+------------------------------------------------------------------------------------------------------------------------
 
+.ENV.EXAMPLE
+Provides a template for all the environments variables needed to run the project. The User can copy it and fill it with
+  the actual values, with secrets like API Key. This file is NEVER committed to version control,
+  ensuring secrecy of the values inserted, keeping secrets outside of the codebase.
+ It highlights which variables are required and which are optional.
+ This setup allows the User to use the application and set it up in different environments, like Development,
+  Staging and Production, ensuring the data is well organized
+ The clear separation between required (only API key) and optional variables, make it easy for the User to de-comment
+  a piece and overwrite the default.
+
+------------------------------------------------------------------------------------------------------------------------
+README.MD
+This file is related to the comprehensive documentation and high-level explanation of the project, of the objectives
+  studied with the project and about the goals achieved. As well as the possible future implementation, scalability
+  and next projects.
 
 
 ========================================================================================================================

@@ -3,9 +3,11 @@
     <words>
       <w>Groq</w>
       <w>Qdrant</w>
+      <w>Univorn</w>
       <w>Uvicorn</w>
       <w>Weaviate</w>
       <w>remote</w>
+      <w>univorn</w>
       <w>zadd</w>
       <w>zcard</w>
       <w>zpopmim</w>

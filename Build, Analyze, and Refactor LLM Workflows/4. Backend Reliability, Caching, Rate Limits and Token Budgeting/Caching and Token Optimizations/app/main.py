@@ -103,12 +103,10 @@ async def chat(request: ChatRequest):
             truncated_warning=None
         )
 
-    # 3. Cache miss – apply token control (truncate or summarise if needed)
+    # 3. Cache miss – apply token control (truncate or summarize if needed)
     try:
         processed_prompt, token_metadata = await app.state.token_validator.prepare_prompt(prompt)
     except TokenLimitExceededError as e:
-        # This should not happen for 'reject' because we already handled it,
-        # but for other strategies it would mean a misconfiguration.
         logger.warning(f"Token limit exceeded after cache miss: {e}")
         return JSONResponse(
             status_code=400,

@@ -504,12 +504,12 @@ Provides a FastAPI web server that exposes the semantic caching proxy for LLM qu
  Moreover, it provides admin endpoints for cache operations and health checks.
  After recieving a single request, it works as follws:
   1. Recieves the query, aka ChatRequest, (together with context, if present);
-  2. Checks the exact cache DB (Redis) and, if there is a cache hit, returns, from the DB, the response stored with cache_hit;
-  3. Checks for the semantic Chroma (Chroma), similarly to Redis, if there is a cache hit, returns, from the DB,
-      the response stored with cache_hit;
-  4. Creates the prompt, made of query + context (eventually);
-  5. Calls the token validation process, eventually generating TokenLimitExceededError (= HTTP 400), or, otherwise,
+  2. Calls the token validation process, eventually generating TokenLimitExceededError (= HTTP 400), or, otherwise,
       if everything is clear, returning the (eventually) processed prompt + adjacent metadata;
+  3. Checks the exact cache DB (Redis) and, if there is a cache hit, returns, from the DB, the response stored with cache_hit;
+  4. Checks for the semantic Chroma (Chroma), similarly to Redis, if there is a cache hit, returns, from the DB,
+      the response stored with cache_hit;
+  5. Creates the prompt, made of query + context (eventually);
   6. Calls the LLM client to generate a response, or may raise timeout/network errors and proceed with the retry
       (eventually stoppage) errors;
   7. Stores the response in both cache BDs (exact and sematic);
@@ -520,6 +520,29 @@ Provides a FastAPI web server that exposes the semantic caching proxy for LLM qu
   • GET /health - returns hhealth status check results to allow other orchestration tools (like Docker or Kubernetes)
      to check whether the service is running correctly and is ready to accept data. If everything is running correctly,
      it returns {"status": "ok"} (= HTTP 200); if the service is facing mulfunctioning, the probing fails.
+Next, we explain how it works:
+ • we get the ChatRequest main information (start_time, query and context), with which we build the prompt
+    (query +  context) and the shutdown process data (like end_time), other than closing Redis and Chroma connections;
+ • we create a FastAPI App with the related metadata shown in /docs;
+ • we perform a fast token count check: if we surpass max_prompt_tokens, we stop the process and return tu the User
+    why the operation stopped, namely wity a log at WARNING level and a JSON response saying that we met the error
+    "TOKEN_LIMIT_EXCEEDED" (no LLM call in this case), otherwise, we move forward;
+ • exact cache check: if we get a exact cache hit, we return immediately (no LLM call) the exact_reponse and some
+    additional data, like the tokens saved etc...; otherwise, we move forward;
+ • semantic cache check, exactly as for the exact cache, but with the semantic cache method, logic is the same,
+    if we get a cache hit, we do not waste tokens as no LLM call happens;
+ • cache miss → build prompt: if cache methods fail (cache miss), we build the prompt and, if needed, we apply the
+    summarization or truncation methods, with prepare_prompt, and return the changes detials with the ErrorResponse
+    and a log at WARNING level.
+    If none of these methods are needed, we move forward;
+ • we call the llm and report if there is any connections error, logging them at ERROR (blocking) level.
+    If there is no errors, we store the content of the prompt in the respective exact and semantic cache DBs.
+     Mind this is a "fire-and-forget" caching, namely it does NOT stop the response, improving latency.
+    Then, we generate, through the LLM, the reponse and highlight some techincal detials such as latency,
+     prompt_tokens and reponse_tokens and log at INFO level.
+    Last, we generate the response, with ChatResponse, with all its technical metadata;
+ • @app.get("/cache/stats" - returns the current cache size sizes and configuration, useful for monitoring;
+ • @app.get("/health") - returns the health check informations we explained before, liveness check for orchestrators.
 
 
 

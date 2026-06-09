@@ -467,7 +467,33 @@ This script is the pure LLM caller that communicates with the given LLM (we chos
   raising an error if all the given retry logics fail with "RetryError".
   The exception types are handled by "httpx".
 Some notes about this file:
- • class LLMClient:
+ • class LLMClient: def __init__ - initializes the LLM model, wìth all its setup (api_key, model, temperature,
+     max_tokens, timeout) taken from config.py. Moreover, it reports the LLM call and the model used with a log at
+     INFO level;
+ • @retry - defines the retry method. It says how the retry logic will work, after calling the LLM:
+    • it stops after settings.retry_attempts attempts (in our case, three);
+    • it waits wait_exponential after each attempt, where the waiting is capped between 1 and 30 seconds, and it increases,
+       attempt after attempt, with an exponential factor: 1.0 * (2^(1-1)) = 1.0 sec after 1st attempt,
+       1.0 * (2^(2-1)) = 2.0 sec after 2nd attempt, 1.0 * (2^(3-1)) = 4.0 sec after 3rd attempt,
+       1.0 * (2^(4-1)) = 8.0 sec after 4th attempt, 1.0 * (2^(5-1)) = 16.0 sec after 5th attempt,
+       1.0 * (2^(6-1)) = 32.0 sec, which we constrained at 30.0 sec after 6th attempt, from the 7th onwards,
+       the wait time is capped at 30 secs. This avoids ridiculous long waits, even if the service is down for 1h.
+       This strategy is provided by the "tenacity" library; it is very used because:
+        1. prevents overwhelming the host of the service (the LLM host);
+        2. allows progressive time for recovery, in case the system is, just temporarily, malfunctioning;
+        3. standard practice used by major cloud providers, such as AWS.
+    • it tells the function to only retry on certain errors, for example, is the error is a TokenLimitExceededError,
+       it will NOT go through the retry cycle, as the error will NOT stop persisting.
+       Only applies to network/timeout/HTTP errors.
+ • async def _call_llm_with_retry - actually sends the prompt to the LLM provider, in this case Groq (via LangChain)
+     and returns the response string. It is different from the "generate" method, as it is a provide method that contains
+     the retry logic as well (@retry decorator), keeping the retry logic autonomous and more easily testable.
+    This method is defined as an async operation, as it calls await self.llm.ainvoke(messages), an asynchronous
+     operation which does NOT block the event loop while waiting for the LLM to respond (less latency and more agile).
+    With messages = [HumanMessage(content=prompt)] we fetch a list of messages (in this case just the given prompt is enough)
+     to feed to LangChain, where HumanMessage represent a user message (role = "user")
+ • async def generate - calls the retry-method defined above, with no extra logic and forces the response to be returned
+     as a string. The other logics, like truncation and token validation and caches, etc..., are handled in the main.py file.
 
 
 
@@ -490,7 +516,7 @@ GENERAL NOTES AND HEADS-UP FOR LEARNING
     TODO!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 3. MODEL MATCHING BETWEEN TOKENIZER AND SUMMARIZATION
     TODO!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    4.
+    
 
 
 

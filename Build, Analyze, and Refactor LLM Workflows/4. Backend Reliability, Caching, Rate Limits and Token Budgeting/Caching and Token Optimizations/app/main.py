@@ -53,7 +53,23 @@ async def chat(request: ChatRequest):
     query = request.query
     context = request.context or ""
 
-    # 1. Exact cache
+    # Build prompt once (used for token validation and later)
+    prompt = build_prompt(query, context)
+
+    # Fast pre‑check for 'reject' strategy – avoid cache lookups if we will reject anyway
+    token_count = app.state.token_validator.count_tokens(prompt)
+    if settings.overflow_strategy == "reject" and token_count > settings.max_prompt_tokens:
+        logger.warning(f"Token limit exceeded ({token_count} > {settings.max_prompt_tokens}) – rejecting early")
+        return JSONResponse(
+            status_code=400,
+            content=ErrorResponse(
+                error="TOKEN_LIMIT_EXCEEDED",
+                message=f"Prompt token count ({token_count}) exceeds limit ({settings.max_prompt_tokens})",
+                details={"token_count": token_count, "limit": settings.max_prompt_tokens}
+            ).model_dump()
+        )
+
+    # 1. Exact cache (using original query+context)
     exact_response = await app.state.exact_cache.get(query, context)
     if exact_response:
         latency_ms = (time.time() - start_time) * 1000
@@ -87,12 +103,13 @@ async def chat(request: ChatRequest):
             truncated_warning=None
         )
 
-    # 3. Cache miss – build prompt and apply token control
-    prompt = build_prompt(query, context)
+    # 3. Cache miss – apply token control (truncate or summarise if needed)
     try:
         processed_prompt, token_metadata = await app.state.token_validator.prepare_prompt(prompt)
     except TokenLimitExceededError as e:
-        logger.warning(f"Token limit exceeded for prompt: {e}")
+        # This should not happen for 'reject' because we already handled it,
+        # but for other strategies it would mean a misconfiguration.
+        logger.warning(f"Token limit exceeded after cache miss: {e}")
         return JSONResponse(
             status_code=400,
             content=ErrorResponse(
@@ -124,9 +141,6 @@ async def chat(request: ChatRequest):
     latency_ms = (time.time() - start_time) * 1000
     prompt_tokens = token_metadata.get("original_token_count", 0)
     response_tokens = app.state.token_validator.count_tokens(llm_response)
-    tokens_sent = prompt_tokens
-    tokens_received = response_tokens
-    tokens_saved = 0
 
     logger.info(f"Cache miss – LLM generated response in {latency_ms:.2f}ms (prompt_tokens={prompt_tokens}, response_tokens={response_tokens})")
 
@@ -134,9 +148,9 @@ async def chat(request: ChatRequest):
         answer=llm_response,
         cache_hit=False,
         cache_type=None,
-        tokens_sent=tokens_sent,
-        tokens_received=tokens_received,
-        tokens_saved=tokens_saved,
+        tokens_sent=prompt_tokens,
+        tokens_received=response_tokens,
+        tokens_saved=0,
         latency_ms=round(latency_ms, 2),
         truncated=token_metadata.get("truncated", False),
         truncated_warning=token_metadata.get("warning")
@@ -161,4 +175,5 @@ async def cache_stats():
 
 @app.get("/health")
 async def health():
+    """Liveness probe for orchestration (Kubernetes, Docker). Returns simple OK status."""
     return {"status": "ok"}

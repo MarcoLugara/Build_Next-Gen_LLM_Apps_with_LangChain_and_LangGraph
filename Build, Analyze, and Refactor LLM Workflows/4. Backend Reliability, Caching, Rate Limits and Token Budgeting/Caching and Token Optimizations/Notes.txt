@@ -1,7 +1,8 @@
 GOALS FOR MY PROJECT
 1. Reduce LLM token costs by 70-90% using semantic similarity caching;
 2. Implement advanced token control: dynamic truncation with transformers;
-3. Use modern tools: FastAPI, Redis, Chroma, transformers, LangChain, Docker and deeply understand their roles
+3. Use modern tools: FastAPI, Redis, Chroma, transformers, LangChain, Docker and deeply understand their roles;
+4. Implement consistent mock testing throughout all functions of the project.
 
 ========================================================================================================================
 

@@ -2,6 +2,7 @@
   <dictionary name="project">
     <words>
       <w>Groq</w>
+      <w>Mynumber</w>
       <w>Qdrant</w>
       <w>Univorn</w>
       <w>Uvicorn</w>

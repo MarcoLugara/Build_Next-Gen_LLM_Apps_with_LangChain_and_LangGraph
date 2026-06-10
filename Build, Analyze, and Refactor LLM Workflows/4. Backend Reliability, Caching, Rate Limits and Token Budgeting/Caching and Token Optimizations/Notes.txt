@@ -56,17 +56,19 @@ ECONOMIC ADVANTAGES:
 
 NEW TOOLS USED COMPARED TO OLD PROJECTS:
 1. FastAPI:
-	Async, automatic OpenAPI docs, high performance, type safety with Pydantic
+	Async, automatic OpenAPI docs, high performance, type safety with Pydantic.
 2. Redis:
-	De facto standard for low-latency exact cache, supports TTL, pub/sub
+	De facto standard for low-latency exact cache, supports TTL, pub/sub.
 3. Chroma:
-	Lightweight vector DB, persists to disk, good for semantic search at moderate scale
+	Lightweight vector DB, persists to disk, good for semantic search at moderate scale.
 4. transformers:
-	Huggingface tranformer that matches the current model and counts token precisely (if it matches the model used)
+	Huggingface tranformer that matches the current model and counts token precisely (if it matches the model used).
 5. Docker Compose:
-	Run Redis + Chroma + app with one command – essential for portfolio
+	Run Redis + Chroma + app with one command – essential for portfolio.
 6. LangChain (OLD):
-	Minimal use – only for LLM calls (abstraction to swap models) and embeddings (same embedder as your current system)
+	Minimal use – only for LLM calls (abstraction to swap models) and embeddings (same embedder as your current system).
+7. Mock tests:
+    We produce mock tests to prove the correct functioning of the project without external client servers.
 
 ========================================================================================================================
 
@@ -99,11 +101,12 @@ semantic_cache_proxy/
 
 REQUIREMENTS.TXT
 We will use 5 categories of tools:
- 1. Web API → Expose the cache as a service (REST endpoints) → FastAPI + Uvicorn
- 2. Caching → Store exact responses (Redis) and semantic embeddings (Chroma) → Redis, ChromaDB
- 3. LLM & Embeddings → Generate answers (Groq) and convert queries to vectors (local embedder) → LangChain Groq, sentence-transformers
- 4. Token Control → Count and truncate prompts to fit model limits → transformers.AutoTokenizer
- 5. Configuration & Utilities → Manage settings, retries, logging → pydantic-settings, tenacity, loguru
+ 1. Web API → Expose the cache as a service (REST endpoints) → FastAPI + Uvicorn;
+ 2. Caching → Store exact responses (Redis) and semantic embeddings (Chroma) → Redis, ChromaDB;
+ 3. LLM & Embeddings → Generate answers (Groq) and convert queries to vectors (local embedder) → LangChain Groq,
+     sentence-transformers;
+ 4. Token Control → Count and truncate prompts to fit model limits → transformers.AutoTokenizer;
+ 5. Configuration & Utilities → Manage settings, retries, logging → pydantic-settings, tenacity, loguru.
 Why these are modern and production-ready:
  • FastAPI – async, auto-OpenAPI docs, Pydantic validation – used by Netflix, Uber.
  • Redis – industry standard for low-latency caching (used by Twitter, GitHub).
@@ -112,15 +115,21 @@ Why these are modern and production-ready:
  • transformers – precise token counter matching the model for the exactness of the count.
  • loguru – prettier, more informative logging than Python's built-in.
 Additional notes on this file:
- • uvicorn – ASGI server that runs FastAPI
- • redis – In-memory key-value store. We'll use redis.asyncio for non-blocking operations. Stores exact cache: (query_hash → response).
- • chromadb – Vector database. Stores embeddings of queries plus response metadata. We'll search for similar embeddings using cosine similarity
- • langchain-groq – Official Groq integration for LangChain. Wraps Groq's API with the standard LangChain BaseLLM interface
+ • uvicorn – ASGI server that runs FastAPI;
+ • redis – In-memory key-value store. We'll use redis.asyncio for non-blocking operations. Stores exact cache:
+    (query_hash → response);
+ • chromadb – Vector database. Stores embeddings of queries plus response metadata. We'll search for similar embeddings
+    using cosine similarity;
+ • langchain-groq – Official Groq integration for LangChain. Wraps Groq's API with the standard LangChain BaseLLM
+    interface;
  • sentence-transformers – Library for sentence embeddings (from Hugging Face). We'll load all-MiniLM-L6-v2.
-    This runs locally, no API needed, uses ~80MB RAM. It converts queries into 384-dimensional vectors for similarity search.
- • tenacity – Retry library with decorators. We'll wrap the Groq API call with @retry to handle transient network errors
+    This runs locally, no API needed, uses ~80MB RAM. It converts queries into 384-dimensional vectors for similarity
+     search;
+ • tenacity – Retry library with decorators. We'll wrap the Groq API call with @retry to handle transient network
+    errors;
  • Huggingface transformers -  they ensure the exact token count by matching the LLM model.
- • loguru – Modern logging with structured output, colors, and easy file rotation. We'll replace the standard logging module.
+ • loguru – Modern logging with structured output, colors, and easy file rotation. We'll replace the standard
+    logging module;
 
 ------------------------------------------------------------------------------------------------------------------------
 
@@ -687,10 +696,28 @@ GENERAL NOTES AND HEADS-UP FOR LEARNING
        obj1.print_value()
      obj1 = Mynumber(17) - creates an object named obj. In __init__(), self will refer to obj1.
      self.value = value - stores 17 in the object's value attribute.
-     When - obj1.print_value() - is called, self, again, refers to obj1, therefore its attribute (the value 17) is printed.
+     When - obj1.print_value() - is called, self, again, refers to obj1, therefore its attribute (the value 17) is
+      printed.
 
 3. MODEL MATCHING BETWEEN TOKENIZER AND SUMMARIZATION
-    TODO!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+   Different models use different tokenization techniques, algorithms and vocabularies (like special character
+    interpretation), namely the process of converting words and strings into a sequence of integers IDs (aka tokens),
+    understandable by the LLM used. For the same string, model tokenize different, producing different token
+    sequences, hence resulting in different token amount computations (even if small). To give some examples,
+    GPT-4 uses cl100k_base tokenizer, Llama 3 uses SentencePiece tokenizer (based on Hugging Face),
+    Mistral uses SentencePiece too, but with a different vocabulary size. Using the same token counter for all three
+    might result imprecise, even for the same sentence, leading to unexpected and incorrect max_prompt_tokens errors.
+   We use
+        self.tokenizer = AutoTokenizer.from_pretrained(settings.tokenizer_model_name)
+    which loads the exact tokenizer relative to the LLM we use as main model. A possible scalable ideal option would be
+    to provide a list of tokenizer relative to the main model, though it is more consistent to do it "by hand" once the
+    LLM is selected; in this project we use Groq, which is compatible with the Llama 3 tokenizer family.
+   In our project, the tokenizer is used for
+    1. counting tokens in the prompt (query + context);
+    2. truncating the prompt (in case we use the sliding window method);
+    3. counting the tokens and tokenizing the prompt before applying the summarization method (if is the one used)
+        and redecoding the summary produced into strings (aka text).
+
 4. TESTABILITY
     !TODO!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Testability: You can mock self.llm.ainvoke in unit tests
 

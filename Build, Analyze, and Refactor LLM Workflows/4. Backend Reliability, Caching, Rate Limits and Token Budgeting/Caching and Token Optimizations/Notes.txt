@@ -1,7 +1,7 @@
 GOALS FOR MY PROJECT
-1. Reduce LLM token costs by 70-90% using semantic similarity caching
-2. Implement advanced token control: dynamic truncation with tiktoken
-3. Use modern tools: FastAPI, Redis, Chroma, tiktoken, LangChain, Docker and deeply understand their roles
+1. Reduce LLM token costs by 70-90% using semantic similarity caching;
+2. Implement advanced token control: dynamic truncation with transformers;
+3. Use modern tools: FastAPI, Redis, Chroma, transformers, LangChain, Docker and deeply understand their roles
 
 ========================================================================================================================
 
@@ -20,24 +20,28 @@ SEMANTIC CACHING WORKFLOW:
 3. Compute embedding of key using same embedder (all-MiniLM-L6-v2)
 4. Search Chroma for similar embeddings (cosine similarity)
    - If similarity >= threshold (e.g., 0.92) → cache hit
-     - Return stored response immediately (latency ~10ms)
-     - Log cache hit, tokens saved = length_of_stored_response
+     • Return stored response immediately (latency ~10ms)
+     • Log cache hit, tokens saved = length_of_stored_response
    - Else → cache miss
-     - Apply token control: check if prompt exceeds max_prompt_tokens. If yes, reject with HTTP 400 error; otherwise proceed.
+     • Apply token control: check if prompt exceeds max_prompt_tokens. If yes, reject with HTTP 400 error;
+        otherwise proceed.
    - Call LLM (async, with streaming optional)
-     - Store in:
+     • Store in:
        a) Redis (exact key → response, TTL) for exact-match speed
        b) Chroma (embedding → response metadata) for semantic search
-     - Return LLM response
+     • Return LLM response
 5. Response includes metadata: cache_hit, tokens_used, tokens_saved, latency_ms
 
 ------------------------------------------------------------------------------------------------------------------------
 
 TOKEN CONTROL WORKFLOW:
-• Use tiktoken to accurately count prompt tokens.
-• If token_count > max_prompt_tokens, reject the request immediately with HTTP 400 and a clear error message:
-   "Prompt too long (X tokens, limit Y). Please shorten your input."
-• No truncation is performed. The user is responsible for shortening the prompt.
+• Use transformers to accurately count prompt tokens.
+• We implement three configurable strategies (overflow_strategy): token_count > max_prompt_tokens,
+   1. we reject the request with error HTTP 400 and a clear message:
+       "Prompt too long (X tokens, limit Y). Please shorten your input.";
+   2. we truncate with a warning and details of the percentage truncated at the beginning and the end and return a
+       detailed warning;
+   3. we keep 70% of the prompt and summarize the rest, to fill out the remaining token window.
 • This ensures data integrity and transparency – no silent alteration of the user's input.
 
 ------------------------------------------------------------------------------------------------------------------------
@@ -57,8 +61,8 @@ NEW TOOLS USED COMPARED TO OLD PROJECTS:
 	De facto standard for low-latency exact cache, supports TTL, pub/sub
 3. Chroma:
 	Lightweight vector DB, persists to disk, good for semantic search at moderate scale
-4. tiktoken:
-	Fast token counting, used by OpenAI, works offline
+4. transformers:
+	Huggingface tranformer that matches the current model and counts token precisely (if it matches the model used)
 5. Docker Compose:
 	Run Redis + Chroma + app with one command – essential for portfolio
 6. LangChain (OLD):
@@ -95,109 +99,128 @@ semantic_cache_proxy/
 
 REQUIREMENTS.TXT
 We will use 5 categories of tools:
-1. Web API → Expose the cache as a service (REST endpoints) → FastAPI + Uvicorn
-2. Caching → Store exact responses (Redis) and semantic embeddings (Chroma) → Redis, ChromaDB
-3. LLM & Embeddings → Generate answers (Groq) and convert queries to vectors (local embedder) → LangChain Groq, sentence-transformers
-4. Token Control → Count and truncate prompts to fit model limits → tiktoken
-5. Configuration & Utilities → Manage settings, retries, logging → pydantic-settings, tenacity, loguru
+ 1. Web API → Expose the cache as a service (REST endpoints) → FastAPI + Uvicorn
+ 2. Caching → Store exact responses (Redis) and semantic embeddings (Chroma) → Redis, ChromaDB
+ 3. LLM & Embeddings → Generate answers (Groq) and convert queries to vectors (local embedder) → LangChain Groq, sentence-transformers
+ 4. Token Control → Count and truncate prompts to fit model limits → transformers.AutoTokenizer
+ 5. Configuration & Utilities → Manage settings, retries, logging → pydantic-settings, tenacity, loguru
 Why these are modern and production-ready:
-• FastAPI – async, auto-OpenAPI docs, Pydantic validation – used by Netflix, Uber.
-• Redis – industry standard for low-latency caching (used by Twitter, GitHub).
-• Chroma – lightweight vector DB, but can be swapped for Qdrant/Weaviate later.
-• Groq – LPU inference (very fast), free tier, used by AI startups.
-• tiktoken – OpenAI's tokenizer, exact token counting (no estimation).
-• loguru – prettier, more informative logging than Python's built-in.
+ • FastAPI – async, auto-OpenAPI docs, Pydantic validation – used by Netflix, Uber.
+ • Redis – industry standard for low-latency caching (used by Twitter, GitHub).
+ • Chroma – lightweight vector DB, but can be swapped for Qdrant/Weaviate later.
+ • Groq – LPU inference (very fast), free tier, used by AI startups.
+ • transformers – precise token counter matching the model for the exactness of the count.
+ • loguru – prettier, more informative logging than Python's built-in.
 Additional notes on this file:
-• uvicorn – ASGI server that runs FastAPI
-• redis – In-memory key-value store. We'll use redis.asyncio for non-blocking operations. Stores exact cache: (query_hash → response).
-• chromadb – Vector database. Stores embeddings of queries plus response metadata. We'll search for similar embeddings using cosine similarity
-• langchain-groq – Official Groq integration for LangChain. Wraps Groq's API with the standard LangChain BaseLLM interface
-• sentence-transformers – Library for sentence embeddings (from Hugging Face). We'll load all-MiniLM-L6-v2.
+ • uvicorn – ASGI server that runs FastAPI
+ • redis – In-memory key-value store. We'll use redis.asyncio for non-blocking operations. Stores exact cache: (query_hash → response).
+ • chromadb – Vector database. Stores embeddings of queries plus response metadata. We'll search for similar embeddings using cosine similarity
+ • langchain-groq – Official Groq integration for LangChain. Wraps Groq's API with the standard LangChain BaseLLM interface
+ • sentence-transformers – Library for sentence embeddings (from Hugging Face). We'll load all-MiniLM-L6-v2.
     This runs locally, no API needed, uses ~80MB RAM. It converts queries into 384-dimensional vectors for similarity search.
-• tenacity – Retry library with decorators. We'll wrap the Groq API call with @retry to handle transient network errors
-• tiktoken – OpenAI's fast tokenizer. Even though we're using Groq, we can use the cl100k_base encoding (GPT-4's tokenizer)
-    as an approximation for any modern LLM. It counts tokens accurately, allowing us to truncate prompts to stay within Groq's context limit (e.g., 8192 tokens)
-• loguru – Modern logging with structured output, colors, and easy file rotation. We'll replace the standard logging module.
+ • tenacity – Retry library with decorators. We'll wrap the Groq API call with @retry to handle transient network errors
+ • Huggingface transformers -  they ensure the exact token count by matching the LLM model.
+ • loguru – Modern logging with structured output, colors, and easy file rotation. We'll replace the standard logging module.
 
 ------------------------------------------------------------------------------------------------------------------------
 
 CONFIG.PY
 In any production system, configuration must be separate from code. This allows:
-• Changing settings without modifying code (environment variables, .env file)
-• Running the same code in development, staging, and production
-• Keeping secrets (API keys) out of version control
-1. About Redis (REmote Dictionary Server): we use Redis when a user asks exactly the same question (byte-for-byte same string),
-     we want to return the cached response in ~10ms without going to Chroma or LLM.
-    We use Redis in Docker: redis://localhost:6379 and we put this in config.py, instead of hardcoding, allowing us to switch
-     between environments, for example Development and Production, seamlessly, without changing code.
-    With redis_ttl_seconds, we decide how long cached responses live, otherwise we would endlessly grow our memory, but, without, we would
-     lose the main purpose of caching for FAQ; TTL forces periodic LLM to refresh cache but keeping repetitive ones, at least temporarily.
-     In our project we set it at one hour, however, being in config.py, we can seamlessly change it, in regard to production demand.
-     Just to keep in mind, once the cache expires, next request will be a cache miss, forcing the LLM to give a fresh response.
+ • Changing settings without modifying code (environment variables, .env file)
+ • Running the same code in development, staging, and production
+ • Keeping secrets (API keys) out of version control
+1. About Redis (REmote Dictionary Server): we use Redis when a user asks exactly the same question (byte-for-byte same
+     string), we want to return the cached response in ~10ms without going to Chroma or LLM.
+    We use Redis in Docker: redis://localhost:6379 and we put this in config.py, instead of hardcoding, allowing us to
+     switch between environments, for example Development and Production, seamlessly, without changing code.
+    With redis_ttl_seconds, we decide how long cached responses live, otherwise we would endlessly grow our memory, but,
+     without, we would lose the main purpose of caching for FAQ; TTL forces periodic LLM to refresh cache but keeping
+     repetitive ones, at least temporarily.
+     In our project we set it at one hour, however, being in config.py, we can seamlessly change it, in regard to
+      production demand.
+     Just to keep in mind, once the cache expires, next request will be a cache miss, forcing the LLM to give a fresh
+      response.
      Possible Redis enhancements, may include "socket_timeout", "retry_on_timeout", "health_check_interval".
-    With redis_max_connections, we establish a max in the connection pool size; if the limit is reached, the next requests will wait for a "socket" to open.
+    With redis_max_connections, we establish a max in the connection pool size; if the limit is reached, the next
+     requests will wait for a "socket" to open.
      It is written in config.py in order to then customize it, with the business needs in production.
      On a laptop 10 is fine; in a serious production environment, it can be easily scaled over 100.
-2. About Chroma: Chroma is a vector database. In our semantic cache, we store a KEY, namely an embedding vector, and a VALUE, namely the original query
-      text + the LLM response.
-     When a new query arrives, Chroma computes its embedding through the LLM; asks Chroma to find "the most similar stored embedding" through
-      similarity search (for example cosine similarity) and, if "similarity score >= similarity_threshold", we get a cache hit, hence we return the
-      cached response. Other vector embedding, eventually more powerful, are Qdrant or Pinecone or Weaviate.
-     With chroma_persist_directory, it says to Chroma where to store its data to then load it from the given directory; this is consistent
-      through restarts. In production, a Docker volume or a mounted permanent disk can be alternatively used. These settings are more easily
-      configurable through the config.py file. The default location is a "./chroma_cache" local folder in the project root.
-     With similarity_threshold, we define the minimum requirement to achieve the cosine similarity hit, therefore the cache hit. Empirically,
-      0.92 is the sweet spot for short queries (i.e. customer questions), balancing safety and hit rate. Must be a value between 0.0 and 1.0.
+2. About Chroma: Chroma is a vector database. In our semantic cache, we store a KEY, namely an embedding vector,
+     and a VALUE, namely the original query text + the LLM response.
+     When a new query arrives, Chroma computes its embedding through the LLM; asks Chroma to find "the most similar
+      stored embedding" through similarity search (for example cosine similarity) and, if
+      "similarity score >= similarity_threshold", we get a cache hit, hence we return the cached response.
+      Other vector embedding, eventually more powerful, are Qdrant or Pinecone or Weaviate.
+     With chroma_persist_directory, it says to Chroma where to store its data to then load it from the given directory;
+      this is consistent through restarts.
+      In production, a Docker volume or a mounted permanent disk can be alternatively used.
+      These settings are more easily configurable through the config.py file. The default location is a "./chroma_cache"
+       local folder in the project root.
+     With similarity_threshold, we define the minimum requirement to achieve the cosine similarity hit,
+      therefore the cache hit. Empirically, 0.92 is the sweet spot for short queries (i.e. customer questions),
+      balancing safety and hit rate. Must be a value between 0.0 and 1.0.
       Other values raise a validation error at startup.
-     With embedding_model_name, it specifies the LLm to use for converting sentences/text into embeddings; the model runs locally and produces
-      vector of fixed dimensions to feed for the similarity search. Good models to use, given existing benchmarks: all-MiniLM-L6-v2 (lightweight,
-      ~80MB RAM, 384-dim vectors, with fast inference), all-mpnet-base-v2 (higher quality but bigger dimension 768-dim),
-      BAAI/bge-small-e (good for retrieval).
-     CONCERN: Unlike Redis, Chroma does NOT have a TTL (Time To Live), hence it can scale memory consuption scarily fast in production-like environments,
-      deletion is managed by-hand by default (concern!). Can be "hybridized" into a Redis like setting, we explain possible strategies:
-       2a. 1st strategy: Time-based Metadata + Periodic cleanup (consistent but objectove and non concept related)
-         We store a timestamp, added entry in metadata, for each entry and run a background job (i.e. daily) to delete entries older than N days.
-       2b. 2nd strategy: LRU (Last Recently Used), namely keep only last N entries (More complex, but more productyion solid)
-         We store up to N entries and gradually delete older ones upon addition of new ones
-       2c. 3rd strategy; Using more sophisticated tools
-         More complex but complete tools can be used intead of Chroma, namely Qdrant (support TTL), Weaving (supports time-based sharding and cleanup),
-          Pinecode (can set delete by metadata filter)
-     We used the LRU strategy, with semantic_cache_lru_check_frequency, hence the max amount of entries to be saved into the semantic cache.
-     Nonetheless, the vector store can be simply changed later one without changin the logic (abstraction) of the project.
+     With embedding_model_name, it specifies the LLm to use for converting sentences/text into embeddings; the model
+      runs locally and produces vector of fixed dimensions to feed for the similarity search. Good models to use,
+      given existing benchmarks: all-MiniLM-L6-v2 (lightweight, ~80MB RAM, 384-dim vectors, with fast inference),
+      all-mpnet-base-v2 (higher quality but bigger dimension 768-dim), BAAI/bge-small-e (good for retrieval).
+     CONCERN: Unlike Redis, Chroma does NOT have a TTL (Time To Live), hence it can scale memory consuption scarily fast
+      in production-like environments, deletion is managed by-hand by default (concern!). Can be "hybridized" into a
+      Redis like setting, we explain possible strategies:
+       2a. 1st strategy: Time-based Metadata + Periodic cleanup (consistent but objectove and non concept related).
+         We store a timestamp, added entry in metadata, for each entry and run a background job (i.e. daily) to delete
+         entries older than N days;
+       2b. 2nd strategy: LRU (Last Recently Used), namely keep only last N entries (More complex, but more productyion
+        solid).
+         We store up to N entries and gradually delete older ones upon addition of new ones;
+       2c. 3rd strategy; Using more sophisticated tools.
+         More complex but complete tools can be used intead of Chroma, namely Qdrant (support TTL), Weaving (supports
+          time-based sharding and cleanup), Pinecode (can set delete by metadata filter);
+     We used the LRU strategy, with semantic_cache_lru_check_frequency, hence the max amount of entries to be saved into
+      the semantic cache. Nonetheless, the vector store can be simply changed later one without changin the logic
+      (abstraction) of the project.
 !!!!!!!!!!!!!!!!!!!!!CHANGE POINT 3 WITH UPDATES. TODO!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-3. About Token control: once we hit a cache miss (exact and sematic cache check), the LLM is called and the input may contain the User query,
-      additional context from the conversation and system instructions. If the total context exceed the mox context window (N tokens for each model),
-      the LLM may either refuse the request or truncate silently and unexpectedly; this is awful and disingenuous in production. Moreover, sinding long
-      prompts wastes tokens (cost) and increases latency (slowness). A common way to assess this problem are a "smarter" truncation
-      (namely keeping only the first 60% and last 40% of the prompt), which still acts silently towards the User.There could be more stable and "ethic"
-      ways for an honest and stable production-style solution:
+3. About Token control: once we hit a cache miss (exact and sematic cache check), the LLM is called and the input may
+      contain the User query, additional context from the conversation and system instructions. If the total context
+      exceed the mox context window (N tokens for each model), the LLM may either refuse the request or truncate
+      silently and unexpectedly; this is awful and disingenuous in production. Moreover, sinding long prompts wastes
+      tokens (cost) and increases latency (slowness). A common way to assess this problem are a "smarter" truncation
+      (namely keeping only the first 60% and last 40% of the prompt), which still acts silently towards the User.
+      There could be more stable and "ethic" ways for an honest and stable production-style solution:
        3a. 1st strategy: Alert and Reject (more critically exact for the User, useful where data loss in not acceptable)
-         If token count > max_prompt_tokens, it does NOT call the LLM; but it reponds clearly stating to the User to shorten the prompt.
-          The response will be like Return HTTP 400 with error: "Prompt too long (X tokens, limit Y)"
-       3b. 2nd strategy: Smart sliding window (better for conversational systems where older context loses importance)
-         The memory only keeps the most recent N tokens and drops older context, i.e. chat memory
-     We used the Alert and Reject strategy.
+         If token count > max_prompt_tokens, it does NOT call the LLM; but it reponds clearly stating to the User to
+          shorten the prompt.
+          The response will be like Return HTTP 400 with error: "Prompt too long (X tokens, limit Y)";
+       3b. 2nd strategy: Smart sliding window (better for conversational systems where older context loses importance).
+         The memory only keeps the most recent N tokens and drops older context, i.e. chat memory;
+     We implemented three configurable strategies: reject, truncate_with_warning, summarize_overflow.
+      The strategy is selected by overwriting the overflow_strategy field in config.py (default is reject).
      The Token control will:
-       1. Counts tokens, measuring accurately prompt length through tiktoken
-       2. If len(prompt_tokens) > max_prompt_tokens, it will raise a HTTPException with details and NOT call the LLm, otherwise, the LLM call goes on.
+       1. Counts tokens, measuring accurately prompt length through transformers.AutoTokenizer
+       2. If len(prompt_tokens) > max_prompt_tokens, it will raise a HTTPException with details and NOT call the LLm,
+           otherwise, the LLM call goes on.
 4. About Perfomance: it will handle error management, namely:
-     • request_timeout_seconds: float = Field(default=30.0, ge=1.0) - sets the max time (in seconds, this case 30) for the HTTP to send a response
-        from Groq after sending the request. If the time exceeds, the request is canceled and an exception is raised.
+     • request_timeout_seconds: float = Field(default=30.0, ge=1.0) - sets the max time (in seconds, this case 30) for
+        the HTTP to send a response from Groq after sending the request. If the time exceeds, the request is canceled
+        and an exception is raised.
         Good and customizable for production-grade scenarios.
-     • retry_attempts: int = Field(default=3, ge=0) - sets the max retry attempts for a LLm request before giving up, and, therefore, raising an exception.
+     • retry_attempts: int = Field(default=3, ge=0) - sets the max retry attempts for a LLm request before giving up,
+        and, therefore, raising an exception.
      • retry_backoff_factor: float = Field(default=1.0, ge=0.1) - controls the delay between retries, using the formula
             delay = backoff_factor * (2 ^ (retry_number - 1))
         hence:
             Retry 1, wait one seond; Retry 2, wait 2 seconds; Retry 3, wait 4 seconds
-5. About Model Config: this class is the configuration for Pydantic's Base Setting, it controls how environment variables and .env files are loaded,
-      and how extra fields are handled. In particular, it says where to look for environment variables. By default, it reads from os.environ.
-      With env_files, it also reads from a .env file.
-     The extra part will say how we define extra fields, namely if we ignore, warn or raise an error.
-     The encoding ensures the .env file is read withUFT-8 (critical for non-ASCII characters).
-     This is standard for professional Python projects.
-     This layout ensures that secret data can be injected directly from private production settings, where secrets are stored.
-     It is provided a .env.example dummy file with example values and instructions.
-     If no .env file is found, the script simply skips it, no error, and it reads from system environment variables.
+5. About Model Config: this class is the configuration for Pydantic's Base Setting, it controls how environment
+     variables and .env files are loaded, and how extra fields are handled. In particular, it says where to look for
+     environment variables. By default, it reads from os.environ.
+    With env_files, it also reads from a .env file.
+    The extra part will say how we define extra fields, namely if we ignore, warn or raise an error.
+    The encoding ensures the .env file is read withUFT-8 (critical for non-ASCII characters).
+    This is standard for professional Python projects.
+    This layout ensures that secret data can be injected directly from private production settings, where secrets are
+     stored.
+    It is provided a .env.example dummy file with example values and instructions.
+    If no .env file is found, the script simply skips it, no error, and it reads from system environment variables.
 
 ------------------------------------------------------------------------------------------------------------------------
 
@@ -208,7 +231,7 @@ Pydantic is a data validations and settings management library for Python, in pa
  • Serialization - Converts Python objects to JSON (and back cleanly and effortlessly);
  • Performance - Very fast computing (written in Rust v2);
  • Integration - It is used by FastAPI, LangChain, LangGraph, Hugging Face, etc...
-Useful tools are
+Useful tools are:
  • BaseModel - A base class for creating Pydantic models. Inside this class, items can be more and more customized;
  • Field - Adds metadata and validation constraints to a field beyond its data type (string, int, etc.);
  • ValidationError - ValidationError raises detailed error messages if constraint conditions are not met;
@@ -230,37 +253,41 @@ CACHE/EXACT.PY • END FOCUS ON FASTAPI
 This file defines the exact cache (Redis) implementation. This is the first cache layer,
   that will hit once the same question is repeated; in this case, the previous response is recycled, and, therefore,
   no LLM tokens (no cost) are used and the latency is critically reduced (~10ms).
-  We recall that Redis looks in-memory, hence lookups tak microseconds (low latency); it supports TTL (Time-To-Live) rules,
-  so old queries expire automatically and, lastly, can be shared across multiple service instances, always natively,
-  which makes it good for scaling into production-like complex systems.
+  We recall that Redis looks in-memory, hence lookups tak microseconds (low latency); it supports TTL (Time-To-Live)
+  rules, so old queries expire automatically and, lastly, can be shared across multiple service instances, always
+  natively, which makes it good for scaling into production-like complex systems.
 It reasonably uses SQL-like commands, standard for query operations, and to manipulate relational databases.
  The operations used in this project are
  • get(query, context) - GET to fetch if the key exists, returning a cached response or NONE;
  • set(query, context, response) - to store the response with TTL (from config);
  • delete(key) (optional) – to manually DELETE keys in case of cache invalidation;
  • stats() – this returns the number of keys, useful for monitoring.
-For storing a Redis keys, we compute a SHA256 has made of (context, query), this allows to keep keys short and deterministic.
+For storing a Redis keys, we compute a SHA256 has made of (context, query), this allows to keep keys short and
+ deterministic.
  REMARK: SHA256 HASH: short for Secure Hash Algorithm 256-bit, is a member of the SHA-2 family,
   and it produces a unique 256-bit (32-byte) hash for any given input.
 To not-blocking async operations, which is critical for FastAPI, we use redis.asyncio.
-To store the response, we use either JSON or plain text (plain text is enough in this project, but can be customized easily).
+To store the response, we use either JSON or plain text (plain text is enough in this project,
+ but can be customized easily).
 The TTL is set up from settings.redis_ttl_seconds, the default is 3600 seconds = 1 hour.
 Lets us analyze the code:
  • def _make_key - used to create the keys to memorize for the queries; given they are made of strings (possibly long),
     we convert them to a fixed 64-char hex string (memory cost-efficient).
-    We use a prefix "chat:*" in order to logically group the exact caches from other instances (for exmaplke semantic caches) or other keys.
+    We use a prefix "chat:*" in order to logically group the exact caches from other instances (for exmaplke semantic
+     caches) or other keys.
     Moreover; if we add keys in the future, this setup will NOT make them collide with the exact caches ones,
     it will be needed to use another prefix in case (e.g. session:xyz789, key for user sessions, or,
     rate_limit:user:42, key for rate limiting for users). Lastly, this allows us to edit them or act with them,
-    using them as a group: for example, we can delete them all at once, using the prefix; we can add other prefix levels,
-    for example, chat:development:..., chat:quality:..., chat:production:...; it allows us to read them better,
+    using them as a group: for example, we can delete them all at once, using the prefix; we can add other prefix
+    levels, for example, chat:development:..., chat:quality:..., chat:production:...; it allows us to read them better,
     as the prefix will indicate whoever is auditing the code what are the keys about.
  • async def get - tool to retrieve with cache: it retrieves cached response for exact query+context and returns a
     response string if cache hit and None otherwise.
     We note that - logger.DEBUG - means that we log at DEBUG level, hence visible only when LOG_LEVEL = DEBUG.
  • async def set - tool that stores the response with exact caching, namely stores it with the 64-char hex string key,
     with its TTL, taken from setting (aka config.py).
-    The response is stored as a plain string (enough for the project), but can be customized to be stored as a JSON output too.
+    The response is stored as a plain string (enough for the project), but can be customized to be stored as a JSON
+     output too.
  • async def delete - tool to manually delete an exact cache entry and returns True if the key existed, and, therefore,
     has been deleted.
     This is crucial on the managing of the project, allowing the dev to manually purge entries at will, with the key.
@@ -271,15 +298,20 @@ Lets us analyze the code:
     this would be less clean as it would not naturally pair up with the TTL expiration setup.
     This choice with the stats part is good ONLY if we assume the cache rate is small enough,
     otherwise the run of the stats part could grow linearly, but yet, very fast, if there is a huge amount of users
-    (mind TTL is NOT based on amounts, but on time!); so, it is good to keep this in mind, as a yellow flag, in case of serious scaling.
-    Alternatives (more complex as non-redis native for TTL) are redis INFO (we need to subtract keys from other namespaces (non "chat:*" ones);
-    create a counter, which has to keep into accounts the keys that have been deleted through TTL, as it does NOT trigger a decrement automatically.
+    (mind TTL is NOT based on amounts, but on time!); so, it is good to keep this in mind, as a yellow flag, in case of
+    serious scaling.
+    Alternatives (more complex as non-redis native for TTL) are redis INFO (we need to subtract keys from other
+    namespaces (non "chat:*" ones); create a counter, which has to keep into accounts the keys that have been deleted
+    through TTL, as it does NOT trigger a decrement automatically.
     Still a limitation to keep in mind.
-    REMARK: count=1000 - does NOT mean that it wiull count only up to 1000 keys! It is a HINT to redis on how many keys count for each "round":
-      if there is 50k keys, it will iterate the command 50 times (with 1000 keys each lap), hence making 50 round trips back and forth to Redis.
+    REMARK: count=1000 - does NOT mean that it wiull count only up to 1000 keys! It is a HINT to redis on how many keys
+     count for each "round":
+     if there is 50k keys, it will iterate the command 50 times (with 1000 keys each lap), hence making 50 round trips
+     back and forth to Redis.
      Still, Redis, may do more or less than the exact amount, it is not a rigid contraint.
-     Note that setting the count too slow, means too many Redis round trips, hence very slow; too high count and Redis may have issues
-     while building a huge reply, and, if unlucky, block, creating memory and performace spikes. Generlly, 1000 is a reasonable default.
+     Note that setting the count too slow, means too many Redis round trips, hence very slow; too high count and Redis
+     may have issues while building a huge reply, and, if unlucky, block, creating memory and performace spikes.
+     Generally, 1000 is a reasonable default.
  • def __init__(self) - and - async def close - to start or end our connection pool to the FastAPI to Redis.
 REMARK: FastAPI: FastAPI is a modern Python web framework for building APIs and its key features are:
  • Async: supports async def endpoints, enabling high concurrency (and, therefore, reduced latency);
@@ -289,8 +321,9 @@ REMARK: FastAPI: FastAPI is a modern Python web framework for building APIs and 
  • Vertical Scaling (more power, CPU/RAM-use, per instance): it can handle thousands of concurrent connections and,
     with univorn as additional tool, can handle multiple co-workers (tools), where, every worker has a separate process.
  This whole project is aimed at attacking the principal bottlenecks present in tools existing: LLM calls
-  (expensive as end-month "token bill") and latency optimization, through cache hits. In bigger production projects, Chroma
-  (good for dev environments) can be easily and smoothly swapped for a distributed vector DB, depending on needs, budgets and project needs.
+  (expensive as end-month "token bill") and latency optimization, through cache hits. In bigger production projects,
+  Chroma (good for dev environments) can be easily and smoothly swapped for a distributed vector DB, depending on needs,
+  budgets and project needs.
 
 ------------------------------------------------------------------------------------------------------------------------
 
@@ -305,56 +338,70 @@ About Embedding Functions: Embeddings are numeric representations of your data t
  Embedding functions can be linked to a collection and used whenever you call add.
 Some notes about this file:
  • Class Initialization:
-   ○ chromadb.PersistentClient - makes so that the client stores data on the disk and, if the directory does not exist, it creates it locally.
-   ○ self.collection - creates or returns (if existing) a collection named "semantic_cache" and a value related to the cosine similarity,
-      using L2 distance, which is pretty standard, but can be customized or further refined. For Chroma there is NO explicit key prefix,
+   ○ chromadb.PersistentClient - makes so that the client stores data on the disk and, if the directory does not exist,
+      it creates it locally.
+   ○ self.collection - creates or returns (if existing) a collection named "semantic_cache" and a value related to the
+      cosine similarity, using L2 distance, which is pretty standard, but can be customized or further refined.
+      For Chroma there is NO explicit key prefix,
       like Redis, but it uses a collection as its namespace: we use "semantic_cache", meanwhile for the LRU,
       we will use "semantic_cache:lru", which is a proper key name (Redis uses keys, Chroma uses collections).
       This will keep the logic organized and readable.
-   ○ SentenceTransformer - loads from cache the model to use for the semantic search (downloads it locally the first time);
+   ○ SentenceTransformer - loads from cache the model to use for the semantic search (downloads it locally the first
+      time);
    ○ decode_responses=True - means that it decodes the Redis response into UTF-8 format, instead of raw bytes,
-      which would be the result if we do not mention the decoding, as the default is False. This makes sense as our project works with strings,
-      not raw bytes, though, this only restricts it to being able to work with raw byts (scalability concerns, in case)
-   ○ self._insert_counter - sets a counter that gets increased by one every time that we add a new semantic cache entry (see async def add),
-      useful to check size, in case, and evict, meaning removing data from a temporary, fast-access memory area,
-      like a cache or session state, to free up space.
- • def _get_embedding - generates the embedding: encode returns a numpy array of floats, which then get converted into a list,
-     which is what Chroma expects. Logging only at DEBUG level.
+      which would be the result if we do not mention the decoding, as the default is False. This makes sense as our
+      project works with strings, not raw bytes, though, this only restricts it to being able to work with raw bytes
+      (scalability concerns, in case);
+   ○ self._insert_counter - sets a counter that gets increased by one every time that we add a new semantic cache entry
+      (see async def add), useful to check size, in case, and evict, meaning removing data from a temporary, fast-access
+      memory area, like a cache or session state, to free up space.
+ • def _get_embedding - generates the embedding: encode returns a numpy array of floats, which then get converted into a
+     list, which is what Chroma expects. Logging only at DEBUG level.
  • async def get - search for semantic similarity for an existing query.
-    Given a query and a context, performs the similarity search (we set up before the cosine method): operates in these steps:
-    1. Creates an embedding from the given query+context
-   REMARK on CONTEXT: this will be handled in the main.py file. To give a view of it, if a user starts a conversation by saying
-    "I bought a laptop" and, then, saying "What about refunds?", the context would include the previous message too,
-    relative to the current query. Represent history and instructions that should be considered as part of the cache content.
-    2. collection.query(query_embeddings=[...], n_results=1) - Chroma returns the single (n_results=1) most similar result,
-        comprehensive of its metadata (where response is and the original query) and distance (result of the 1 - cosine similarity,
-        hence similarity = 1 - distance)
-    3. if the similarity is greater of equal than the similarity_threshold, we return the cached query, saved in local memory.
-       REMARK ON RESULTS: results, given from Chroma's collection.query(...) is a nested list, which can be generalized to far more complex
-        results (matrix, namely results['metadatas'][query n°][result n° for that query]); in our case, we have only one query and
-        one result for the single query, hence we do simply results['metadatas'][0][0].
+    Given a query and a context, performs the similarity search (we set up before the cosine method): operates in these
+     steps:
+    1. Creates an embedding from the given query+context;
+   REMARK on CONTEXT: this will be handled in the main.py file. To give a view of it, if a user starts a conversation by
+    saying "I bought a laptop" and, then, saying "What about refunds?", the context would include the previous message
+    too, relative to the current query. Represent history and instructions that should be considered as part of the
+    cache content.
+    2. collection.query(query_embeddings=[...], n_results=1) - Chroma returns the single (n_results=1) most similar
+        result, comprehensive of its metadata (where response is and the original query) and distance
+        (result of the 1 - cosine similarity, hence similarity = 1 - distance);
+    3. if the similarity is greater of equal than the similarity_threshold, we return the cached query, saved in local
+        memory.
+       REMARK ON RESULTS: results, given from Chroma's collection.query(...) is a nested list, which can be generalized
+        to far more complex results (matrix, namely results['metadatas'][query n°][result n° for that query]);
+        in our case, we have only one query and one result for the single query, hence we do simply
+        results['metadatas'][0][0].
     4. await self.redis.zadd - will update the timestamp and doc_id information about the semantic cache hit
-       REMARK ON ZADD: zadd adds or updates a member in a Redis sorted set with a new score, called timestamp, we use it to track LRU order.
-    5. it returns a triplet tuple made of (response, cached_query, similarity), so we know what has been matched with the current query,
-        in cache we have a semantic cache hit.
+       REMARK ON ZADD: zadd adds or updates a member in a Redis sorted set with a new score, called timestamp,
+       we use it to track LRU order;
+    5. it returns a triplet tuple made of (response, cached_query, similarity), so we know what has been matched with
+        the current query, in cache we have a semantic cache hit.
  • async def add - to add and store a new (query, response) to our sematic cache, with LRU tracking.
     Once again, as for the search, we divide this tool in different steps:
     1. full_text - we create the tuple of context & query
     2. embedding - we create the relative embedding (to be fed to the similarity search algorithm);
     3. doc_id - we attach to the entry a unique identifier, that we call doc_id;
-    4. self.collection.add - we store it into Chroma, with its id, embedding and metadata (query&response&creation time);
-    5. with zadd (see above for details), we add the LRU information to Redis, it will be the creation time in this case;
+    4. self.collection.add - we store it into Chroma, with its id, embedding and metadata
+        (query&response&creation time);
+    5. with zadd (see above for details), we add the LRU information to Redis, it will be the creation time in this
+        case;
     6. self._insert_counter += 1 - we increase by one the counter for the times we used that sematic cache;
     7. semantic_cache_lru_check_frequency - we check if we reached the max amount of semantic cache to keep in memory
-         (limit=max_semantic_cache_entries, adjustable in config.py); if the number of entries is greater than the max we decided to allow,
-         we call the method _evict_if_needed, which we explain in the next paragraph, which checks the LRU times and
-         deletes the oldest entries into our semantic DB, so that we stay below the agreed limit (max_semantic_cache_entries).
-        Lastly, we reset the counter, so that we can re-check and, eventually, re-purge the DB after an other N entries added.
+         (limit=max_semantic_cache_entries, adjustable in config.py); if the number of entries is greater than the max
+         we decided to allow, we call the method _evict_if_needed, which we explain in the next paragraph, which checks
+         the LRU times and deletes the oldest entries into our semantic DB, so that we stay below the agreed limit
+         (max_semantic_cache_entries).
+        Lastly, we reset the counter, so that we can re-check and, eventually, re-purge the DB after an other N entries
+         added.
     8. logger.debug - lastly, we add, at debug level, the log of what we did.
- • async def _evict_if_needed - we define the method to delete all the oldest (LRU-wise) entries, so that we have at most
-     max_semantic_cache_entries-entries into our semantic cache DB.
+ • async def _evict_if_needed - we define the method to delete all the oldest (LRU-wise) entries, so that we have at
+     most max_semantic_cache_entries-entries into our semantic cache DB.
     In terms of logs, we keep:
-    ○ the before-deleting semantic cache size, the number of entries deleted and the resulting sematic cache DB size at INFO level;
+    ○ the before-deleting semantic cache size, the number of entries deleted and the resulting sematic cache DB size at
+       INFO level;
     ○ which semantic cache entries we delete (exact doc_id identification) at DEBUG level;
     ○ which semantic cache entry (doc_id) has NOT been able to be deleted and the specific Exception (error) text.
     REMARK ON ZPOPMIN: this command removes and returns the member(s) with the smalled "score" from a generic Redis set.
@@ -362,40 +409,44 @@ Some notes about this file:
       meaning the removal and return of the parsed and edited solution is done with the same command.
      In our case - popped = await self.redis.zpopmin("semantic_cache:lru", count=1) - will return a list of tuples,
       made of (member, score).
-    REMARK ON THE VARIABLE POPPER: we store the deleted tuples in the variable "popper"; the if check is a safety check:
+    REMARK ON THE VARIABLE POPPED: we store the deleted tuples in the variable "popped"; the if check is a safety check:
       if the popped variable is empty, it means an other process or a manual operation already edited the set and
       the loop breaks safely, returning a empty list. (if not popped - means - if popped is (an) empty (list)).
      An other thing to note is that, on the uniqueness side, we are safe: zpopmim would delete identical value, in case
-      of multiple entries with the oldest score;in out code this does NOT happen, as we are using timestamps, so that's ok.
+      of multiple entries with the oldest score;in out code this does NOT happen, as we are using timestamps,
+      so that's ok.
      Semantically, the variable name "popped" is reasonable, as .pop() is a Chroma-standard method to delete entries
       from collections during data processing.
     REMARK ON ZCARD: this acting like the cardinality operation in a given set ans returns an integer of
-      how many members are present in a ordered set. In our case, we use it to count the size of our current semantic cache
-      and to compare it with "max_semantic_cache_entries", in order to decide if the eviction process is needed
+      how many members are present in a ordered set. In our case, we use it to count the size of our current semantic
+      cache and to compare it with "max_semantic_cache_entries", in order to decide if the eviction process is needed
       ("collection.delete"). In this case, zcard would give the same result as using collection.count() (in Chroma)
- • async def stats - returns us semantic cache statistics, in particular: the number of documents in the Croma collection,
-     the number of entries in the Redis-LRU recording (those two should match, if the counting is consistent); if they do not match,
-     we raise an Error and detail what is missing where, to be able to then assess the problem and question Chroma and Redis.
-    It returns a dictionary with all the information's about Redis, Chroma or, in case, the errors found across the two DBs.
- • async def close - Closes the Redis connection.
-    REMARK: WE DO NOT CLOSE CHROMA: Chroma client does NOT require explicit closing, it is safe ONLY IF, we are working with
-     ephemeral (aka in-memory) clients, otherwise it is CRITICAL to manually close Chroma connection too, to ensure.
+ • async def stats - returns us semantic cache statistics, in particular: the number of documents in the Croma
+     collection, the number of entries in the Redis-LRU recording (those two should match, if the counting is
+     consistent); if they do not match, we raise an Error and detail what is missing where, to be able to then assess
+     the problem and question Chroma and Redis.
+    It returns a dictionary with all the information's about Redis, Chroma or, in case, the errors found across the
+     two DBs.
+ • async def close - Closes the Chroma client for consistency.
+
 
 ------------------------------------------------------------------------------------------------------------------------
 
 TOKEN_CONTROL.PY
 It manages all token-related operations for prompts, before they are fed to the LLM;
- in particular it supports these strategies, depending on the method chosen in settings.overflow_strategy, from config.py.
- 1. reject - Alert & Reject: if a prompt exceed the max_prompt_tokens (see config.py), it raises a TokenLimitExceededError Error
-     with a clear message;
- 2. truncate_with_warning - Truncation with warning: it automatically shortens the prompt, keeping only the first X% and the last Y% of tokens,
-     dropping the middle. Good if an answer is always required, despite the cost of risking losing context.
-     Returns metadata containing clear warning messages telling that the prompt was altered;
+ in particular it supports these strategies, depending on the method chosen in settings.overflow_strategy, from
+ config.py.
+ 1. reject - Alert & Reject: if a prompt exceed the max_prompt_tokens (see config.py), it raises a
+     TokenLimitExceededError Error with a clear message;
+ 2. truncate_with_warning - Truncation with warning: it automatically shortens the prompt, keeping only the first X% and
+     the last Y% of tokens, dropping the middle. Good if an answer is always required, despite the cost of risking
+     losing context. Returns metadata containing clear warning messages telling that the prompt was altered;
  3. summarize_overflow - Keeps part of the prompt (X% of the allowed limit, in terms of tokens), and sends the remaining
      part (the overflow) to a cheap LLM for it to be summarized. The summary is then prepared to be used.
      A log at warning level is therefore produced (TO USER????????? !TODO!)
 REMARK-DEEP DIVE ON THE LANCHAIN IMPORTS: We import two langchain modules we have not used before:
- 1. "langchain_groq" - the LangChain wrapper for Groq's LLM, used only for the summarization part in the summarize_overflow strategy;
+ 1. "langchain_groq" - the LangChain wrapper for Groq's LLM, used only for the summarization part in the
+      summarize_overflow strategy;
  2. "langchain_core.messages" - which provides classes that manage the fow of messages between user and LLM,
       serving as backbone for the conversation. The main classes are:
       • HumanMessage - (the one we use), represents messages sent from user to LLM and allows customization of query,
@@ -407,12 +458,12 @@ REMARK-DEEP DIVE ON THE LANCHAIN IMPORTS: We import two langchain modules we hav
 We go through the code piece by piece:
  • class TokenLimitExceededError - this class defines the behavior in case of a Token Count Exceeding error,
      providing a clear Error message, comparing max_tokens (we will use the value set up in config.py,
-     hence easy customization towards client needs) and token_count, given by tiktoken;
- • class TokenValidator - this class initializes the token validation, meaning it calls the cheap LLM for the summarization,
-     setting temperature (at 0.0, fully objective towards the text fed to the LLM), max tokens "max_tokens" for the summarization
-     (we set up the default 512, as an happy medium, but we, as always, make it customizable in config.py),
-     as well as the tokenizer and summarization model (MUST be the same, see config.py), last,
-     reports when the summarization began with a log at INFO level;
+     hence easy customization towards client needs) and token_count, given by transformers.AutoTokenizer;
+ • class TokenValidator - this class initializes the token validation, meaning it calls the cheap LLM for the
+     summarization, setting temperature (at 0.0, fully objective towards the text fed to the LLM), max tokens
+     "max_tokens" for the summarization (we set up the default 512, as an happy medium, but we, as always, make it
+     customizable in config.py), as well as the tokenizer and summarization model (MUST be the same, see config.py),
+     last, reports when the summarization began with a log at INFO level;
  • def count_tokens - the function returning the token count
  • def _truncate_sliding_window - this works as follows:
      ○ we take the computed number of tokens and, if the token count is below the limit we chose in config.py,
@@ -427,7 +478,8 @@ We go through the code piece by piece:
      ○ we take the computed number of tokens and, if the token count is below the limit we chose in config.py,
         namely "max_prompt_tokens", we close the cycle and specify that we did NOT truncate anything and
         return everything unchanged; otherwise, we move on (as per the truncation method);
-     ○ we keep the first "keep_tokens" and classify the latter as "overflow_tokens", last we decode them back into string (text);
+     ○ we keep the first "keep_tokens" and classify the latter as "overflow_tokens", last we decode them back into
+        string (text);
      ○ we invoke the weak LLm prompting a under 200 word summary of the "overflow_tokens"'s text,
         decode it back into string (text) and save it as "summary". Hence our prompt will be:
         processed_prompt = kept_part + marker that summarized content starts + summary
@@ -444,12 +496,12 @@ We go through the code piece by piece:
      ○ if the strategy used does NOT exist, simply returns Reject and raises an Exception
         (no silent ignores and clear error messages)
  REMARK: TOKENIZER: The tokenizer is a Hugging Face AutoTokenizer loaded from settings.tokenizer_model_name.
-  For consistency, it HAS TO BE the same used by the summarizer and (better even) the same tokenizer used by the main LLM
-  (maybe a lighter version), because different models tokenize the same text differently.
+  For consistency, it HAS TO BE the same used by the summarizer and (better even) the same tokenizer used by the
+   main LLM (maybe a lighter version), because different models tokenize the same text differently.
   This allows the given LLM to see the exact token count (in its metric).
   We note that the tokenizer gives you the ONLY accurate (and objective for the give LLM) way to count.
   It is crucial to note that token is NOT equal work, for example, for some models, “hello” might be one,
-  “hello world” might be two but “helloworld” could be three.
+   “hello world” might be two but “helloworld” could be three.
 
 ------------------------------------------------------------------------------------------------------------------------
 
@@ -459,12 +511,13 @@ This script is the pure LLM caller that communicates with the given LLM (we chos
  The script assumes the prompt is already correctly edited to meet all token constraints (see token_control.py) and,
   given a prompt string, through a retry logic, for robustness and handling possible errors, responds with a string.
  We separate the three parts, to make it easily scalable and customizable (for example switching LLM) and
-  completely independent of the cache and token logics, handled respectively in exact.py & semantic.py and token_control.py.
- The main import tool we heavily use is "tenacity", its decorators allow us to, respectively, handle the retry logic with "retry",
-  handle the timeout after X attempts with "stop_after_attempt", handling wait time between attempts,
+  completely independent of the cache and token logics, handled respectively in exact.py & semantic.py and
+  token_control.py.
+ The main import tool we heavily use is "tenacity", its decorators allow us to, respectively, handle the retry logic
+  with "retry" handle the timeout after X attempts with "stop_after_attempt", handling wait time between attempts,
   increasing it between each attempt (common practice, even by major cloud providers, as a flood of immediate retries
-  can make the problem worse) with "wait_exponential", retrying under specific conditions with "retry_if_exception_type",
-  raising an error if all the given retry logics fail with "RetryError".
+  can make the problem worse) with "wait_exponential", retrying under specific conditions with
+  "retry_if_exception_type", raising an error if all the given retry logics fail with "RetryError".
   The exception types are handled by "httpx".
 Some notes about this file:
  • class LLMClient: def __init__ - initializes the LLM model, wìth all its setup (api_key, model, temperature,
@@ -472,8 +525,8 @@ Some notes about this file:
      INFO level;
  • @retry - defines the retry method. It says how the retry logic will work, after calling the LLM:
     • it stops after settings.retry_attempts attempts (in our case, three);
-    • it waits wait_exponential after each attempt, where the waiting is capped between 1 and 30 seconds, and it increases,
-       attempt after attempt, with an exponential factor: 1.0 * (2^(1-1)) = 1.0 sec after 1st attempt,
+    • it waits wait_exponential after each attempt, where the waiting is capped between 1 and 30 seconds, and it
+       increases, attempt after attempt, with an exponential factor: 1.0 * (2^(1-1)) = 1.0 sec after 1st attempt,
        1.0 * (2^(2-1)) = 2.0 sec after 2nd attempt, 1.0 * (2^(3-1)) = 4.0 sec after 3rd attempt,
        1.0 * (2^(4-1)) = 8.0 sec after 4th attempt, 1.0 * (2^(5-1)) = 16.0 sec after 5th attempt,
        1.0 * (2^(6-1)) = 32.0 sec, which we constrained at 30.0 sec after 6th attempt, from the 7th onwards,
@@ -486,27 +539,30 @@ Some notes about this file:
        it will NOT go through the retry cycle, as the error will NOT stop persisting.
        Only applies to network/timeout/HTTP errors.
  • async def _call_llm_with_retry - actually sends the prompt to the LLM provider, in this case Groq (via LangChain)
-     and returns the response string. It is different from the "generate" method, as it is a provide method that contains
-     the retry logic as well (@retry decorator), keeping the retry logic autonomous and more easily testable.
+     and returns the response string. It is different from the "generate" method, as it is a provide method that
+     contains the retry logic as well (@retry decorator), keeping the retry logic autonomous and more easily testable.
     This method is defined as an async operation, as it calls await self.llm.ainvoke(messages), an asynchronous
      operation which does NOT block the event loop while waiting for the LLM to respond (less latency and more agile).
-    With messages = [HumanMessage(content=prompt)] we fetch a list of messages (in this case just the given prompt is enough)
-     to feed to LangChain, where HumanMessage represent a user message (role = "user")
+    With messages = [HumanMessage(content=prompt)] we fetch a list of messages (in this case just the given prompt is
+     enough) to feed to LangChain, where HumanMessage represent a user message (role = "user").
  • async def generate - calls the retry-method defined above, with no extra logic and forces the response to be returned
-     as a string. The other logics, like truncation and token validation and caches, etc..., are handled in the main.py file.
+     as a string. The other logics, like truncation and token validation and caches, etc..., are handled in the
+     main.py file.
 
 ------------------------------------------------------------------------------------------------------------------------
 
 MAIN.PY
 Provides a FastAPI web server that exposes the semantic caching proxy for LLM queries, handling requests, checking
-  exact & semantic cache, applying token control methods (rejection, truncation, summarization), calling the LLM, storing
-  cache responses and returning structured responses, comprehensive of metadata (token count, cache hits, warning).
+  exact & semantic cache, applying token control methods (rejection, truncation, summarization), calling the LLM,
+  storing cache responses and returning structured responses, comprehensive of metadata
+  (token count, cache hits, warning).
  Moreover, it provides admin endpoints for cache operations and health checks.
  After recieving a single request, it works as follws:
   1. Recieves the query, aka ChatRequest, (together with context, if present);
   2. Calls the token validation process, eventually generating TokenLimitExceededError (= HTTP 400), or, otherwise,
       if everything is clear, returning the (eventually) processed prompt + adjacent metadata;
-  3. Checks the exact cache DB (Redis) and, if there is a cache hit, returns, from the DB, the response stored with cache_hit;
+  3. Checks the exact cache DB (Redis) and, if there is a cache hit, returns, from the DB, the response stored with
+      cache_hit;
   4. Checks for the semantic Chroma (Chroma), similarly to Redis, if there is a cache hit, returns, from the DB,
       the response stored with cache_hit;
   5. Creates the prompt, made of query + context (eventually);
@@ -608,9 +664,31 @@ GENERAL NOTES AND HEADS-UP FOR LEARNING
     In Python a _ (underscore) before a method means that given method is for INTERNAL use only or protected in some way:
      it signals to other (maybe future) developers and other tools that this method is NOT part of the public API and
      should NOT be called outside the class
-2. SELF
-    We use self.XXXX many times in our project, it is worth to write a detailed explanation of its features.
-    TODO!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+2. SELF (We use self.XXXX many times in our project, it is worth to write a detailed explanation of its features).
+    self method is a crucial technique in OOP (Object Oriented Programming) in Python. self is a conventional parameter
+     name used to pass a method on an instance, using the instance itself as the first argument and it refers to the
+     specific instance of the class on which the method is called. Basically it serves to tell which instance is the
+     method operating on.
+    Let us explain some snippets of our code as an example and an external, simple one:
+     • class ExactCache:
+          def __init__(self):
+              self.redis = redis.from_url(...)   # self.redis belongs to the instance
+      This created two instances, cache1 and cache2. Without self, the method would have no way to distinguish between
+       the two instances
+     • class Mynumber:
+           def __init__(self, value):
+               self.value = value
+
+           def print_value(self):
+               print(self.value)
+
+       obj1 = Mynumber(17)
+       obj1.print_value()
+     obj1 = Mynumber(17) - creates an object named obj. In __init__(), self will refer to obj1.
+     self.value = value - stores 17 in the object's value attribute.
+     When - obj1.print_value() - is called, self, again, refers to obj1, therefore its attribute (the value 17) is printed.
+
 3. MODEL MATCHING BETWEEN TOKENIZER AND SUMMARIZATION
     TODO!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 4. TESTABILITY

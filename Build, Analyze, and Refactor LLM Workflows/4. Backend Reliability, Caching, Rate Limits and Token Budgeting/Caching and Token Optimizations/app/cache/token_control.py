@@ -93,7 +93,7 @@ class TokenValidator:
         if token_count <= settings.max_prompt_tokens:
             return prompt, {"truncated": False, "original_token_count": token_count}
 
-        strategy = settings.token_control_strategy
+        strategy = settings.overflow_strategy
         if strategy == "reject":
             logger.warning(f"Token limit exceeded: {token_count} > {settings.max_prompt_tokens} – rejecting")
             raise TokenLimitExceededError(token_count, settings.max_prompt_tokens)

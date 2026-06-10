@@ -43,8 +43,7 @@ class Settings(BaseSettings):
                                    description="Maximum tokens allowed in prompt (input + context)")
     tokenizer_model_name: str = Field(default="meta-llama/Meta-Llama-3-8B-Instruct",
                                       description="Hugging Face model name for tokenizer (!MUST! match the LLM used)")
-    token_control_strategy: str = Field(
-        default="reject",
+    overflow_strategy: str = Field(default="reject",
         description="Strategy: 'reject', 'truncate_with_warning', 'summarize_overflow'"
     )
     truncation_keep_start_ratio: float = Field(default=0.6, ge=0.0, le=1.0,

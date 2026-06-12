@@ -660,6 +660,7 @@ Provides a template for all the environments variables needed to run the project
   a piece and overwrite the default.
 
 ------------------------------------------------------------------------------------------------------------------------
+
 README.MD
 This file is related to the comprehensive documentation and high-level explanation of the project, of the objectives
   studied with the project and about the goals achieved. As well as the possible future implementation, scalability
@@ -720,7 +721,10 @@ GENERAL NOTES AND HEADS-UP FOR LEARNING
         and redecoding the summary produced into strings (aka text).
 
 4. TESTABILITY
-    !TODO!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Testability: You can mock self.llm.ainvoke in unit tests
+    To ensure the project works flawlessly, we create a mock control setup, testing all the scenarios studied, in depth;
+     to achieve this, a new section of files, grouped in a subfolder called tests, using the library pytest.
+
+
 
 
 

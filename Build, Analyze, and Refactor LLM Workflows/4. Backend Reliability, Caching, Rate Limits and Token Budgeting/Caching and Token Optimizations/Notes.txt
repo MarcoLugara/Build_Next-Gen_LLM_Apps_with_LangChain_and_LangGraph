@@ -723,7 +723,10 @@ GENERAL NOTES AND HEADS-UP FOR LEARNING
 4. TESTABILITY
     To ensure the project works flawlessly, we create a mock control setup, testing all the scenarios studied, in depth;
      to achieve this, a new section of files, grouped in a subfolder called tests, using the library pytest.
-
+    In our project, we use ainvoke as an asynchronous method that returns us the result of an asynchronous function
+     (coroutine), used in frameworks like LangChain and LangGraph; to mock this method, we will use AsyncMock,
+     which will simulate the async function, returning an awaitable result when called.
+    
 
 
 

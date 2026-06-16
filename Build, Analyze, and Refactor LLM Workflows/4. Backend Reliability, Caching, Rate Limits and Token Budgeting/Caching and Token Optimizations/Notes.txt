@@ -819,13 +819,15 @@ REMARK ON THE PATCH COMMAND: tests the correct functionality of the delete metho
         with patch('app.config.settings.max_prompt_tokens', new=10):
   It works with other libraries and test frameworks such as unittest, pytest, nose, doctest.
 REMARK ON LOGGING THE ASSERTION RESULTS:
-There is no reason to add a logging logic to the assertions because, when an assertion is not met, hence the condition
- is False, pytest raises an AssertionError and a report about why it failed. This is NOT a log message, but a runtime
- exception that stops the test execution. The assert statements are per-se a tool handling the error and issues
- reporting.
+ There is no reason to add a logging logic to the assertions because, when an assertion is not met, hence the condition
+  is False, pytest raises an AssertionError and a report about why it failed. This is NOT a log message, but a runtime
+  exception that stops the test execution. The assert statements are per-se a tool handling the error and issues
+  reporting.
+REMARK ON PYTEST.MARK.ASYNCIO
 
 ------------------------------------------------------------------------------------------------------------------------
 
+TEST_SEMANTIC.PY
 
 
 

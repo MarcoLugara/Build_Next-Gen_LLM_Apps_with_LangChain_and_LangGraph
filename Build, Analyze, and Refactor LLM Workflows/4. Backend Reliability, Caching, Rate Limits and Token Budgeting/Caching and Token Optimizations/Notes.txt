@@ -666,6 +666,170 @@ This file is related to the comprehensive documentation and high-level explanati
   studied with the project and about the goals achieved. As well as the possible future implementation, scalability
   and next projects.
 
+========================================================================================================================
+MOCKING (TESTS) FOLDER
+========================================================================================================================
+CONFTEST.PY
+This file will mock the config.py settings without reading (truly) the .env, but producing results as if it was read.
+The same concept will apply for a AsyncMock for a Redis client connection and a Chroma collection, all through the
+ pytest library, the testing framework. MagicMock is used to mock synchronous methods, instead.
+ The Settings class taken from app.config is the real one from which we create a mock instance of, using the decorator
+  @pytest.fixture. The same we do for the Redis client and the Chroma collection.
+ The - .fixture - means that, given the pytest module (the library), there is a function called fixture, hence it is
+  executing pytest.fixture(your_function), in the first case, pytest.fixture(mock_settings).
+  This function works as follows: it wraps into an internal object called FixtureDef, which stores:
+  • the function itself, in this case mock_settings
+  • the name of the fixture used, in this case always mock_settings
+  • the scope, which can be function, module, session, etc... In this case it is function (the default)
+    REMARK ON SCOPE
+     Pytest manages FixtureDef objects using five standard scope levels, ordered from shortest to longest lifespan:
+      1. function: The default scope. Pytest runs the fixture fresh for every single test function that requests it.
+      2. class: Runs once per test class. All test methods inside that class share the same fixture instance.
+      3. module: Runs once per Python file (.py). Every test inside that file shares the same fixture instance.
+      4. package: Runs once per directory package. It is shared across multiple test files within that folder.ù
+      5. session: Runs exactly once at the very start of the entire test run. Every test in the whole suite shares it.
+  • dependencies, if there is any
+  Pytest keeps an internal registry (made of a Python dictionary) of all available fixtures and, every time a new
+   FixtureDef is ran, it adds it to the registry, using the function name as a key. Lastly, it attaches a special
+   attribute, so that pytest can identify it later.
+  When running the code, the Pytest will look for this function inside the Fixture collection and run it, ensuring
+   more smooth and precise execution.
+ MagicMock(spec=Settings) - creates a mock that pretends to be a Settings instance. If it tries to reach an attribute
+  which does NOT exist in the "real" settings class, it will raise an AttributeError, like saying
+  "I cannot mock what doesn't formerly exist!".
+ We then manually set up all the attributes in the class, so that upon a test run, everything is visible and seemingly
+  coherent. TODO! Later, in ????? we use patch to replace the former settings class.
+For the redis client, we work similarly, where
+ • mock = AsyncMock() - means that all the methods (hence mock.??) are Async methods by default
+    It is critical to remember that, the Redis method we developed, either returns the cache hit, hence a string or, in
+     case there is a cache miss, it returns None; we, therefore, "hardcode" None as a response from the Redis method,
+     confgurable for different test cases. In the set method, we return None, as we do not care about the return value,
+     as, given the get will return None, there is not interest in what we set in the memory, we just care that the
+     method was called. Similarly, - mock.delete.return_value = 1 - means that, once calling the deletion method, it
+     will always return bool(1) meaning True.
+ • scan_iter - from "app/cache/exact.py" there is the method "self.redis.scan_iter", which, in real Redis, it iterates
+    through all keys matching a pattern, namely "chat:*". In our mock setup, we define a fake async generator that
+    simply yelds one hardcoded key, namely "chat:abc123"; this ensure that the loop works (iterating once only),
+    confirming the count logic works.
+ As before, we will force pass this mock to redis.from_url via the patch command, to implement the imposed mock
+  responses.
+For the Chroma collection, again it is similar, where
+ • query - returns by default an empty result, indicating cache miss. This is easily configurable to simulate cache
+    hits, by hardcoding the query.return_value object.
+ • the - add, count, delete, operations will be basically non-existent, forcing them to do nothing, again configurable
+    from here to hardcode results.
+These fixtures will be valid and working in all test modules inside the /tests directory.
+
+------------------------------------------------------------------------------------------------------------------------
+
+TEST_EXACT.PY
+This file serves for the generation of tests of instances replacing the original processes in exact.py, testing all its
+ functionalities.
+We use the mock_redis_client defined in conftest.py for the Redis client connection.
+These tests will verify:
+ 1. The key generation, through _make_key function.
+ 2. The get method, both for a cache hit and a miss.
+ 3. The set method, both for a cache hit and a miss.
+ 4. The delete method, returning True or False, based on the Redis delete count, namely if there is actually something
+     to realistically delete.
+ 5. The stats method, which counts the number of keys saved, using scan_iter.
+ 6. The close methods, to close the Redis connection.
+These tests will ensure the complete and comprehensive functionality of the Redis tools, making sure that, upon serving
+ identical prompts, same responses are produced, reducing latency and zero-ing the consumption of tokens.
+We analyze how the code behaves, method by method:
+ • test_exact_cache_make_key - verifies that the _make_key actually generates (correctly) a SHA256 hash with prefix
+    "chat:". We mock Redis to ensure it does not actually create a real Redis connection (hence we dont need to mock the
+    from_url function; the idea is that ExactCache.__init__ would try to connect to Redis otherwise.
+   We use " 'app.cache.exact.redis' " to replace the redis module inside app.cache.exact with a mock version
+    (using the patch); we do not use the clean mock_redis, because it would still try to create a Redis regular
+    connection.
+   Once we create a instance of ExactCache, inside cache, this method will not attempt a real connection, thank to the
+    patch setup defined; then we create a key with the _make_key method.
+   Last, we use the assert methods to make sure everything was done correctly, hence that key begin with our prefix
+    "chat:" and that the length is correct, hence the 5 characters for "chat:" + the 64 characters from the SHA256.
+    If the assertion returns negative, means there is an internal code design problem with the workflow.
+ • test_exact_cache_get_hit - we simulate a cache hit and expect a string as a return.
+   The setup about the fake Redis connection is the same as before.
+   We mock the default value given by get (which would be None) with an handmade "cache response", to return a proper
+    string.
+   With the patch we replace only the from_url method, to redirect it to our fake Redis connection, this way, when
+    the ExactCache runs, the ExactCache.__init__ calls the usual redis.from_url(), but receives our mock client instead
+    of the real Redis one.
+   Later, we create the cache instance to, then, create the response, taken from the mock Redis client.
+   Finally, we move to the asserts, namely the checks, and we check: if the response was the mocked one and if the get
+    method on the mock client was actually called exactly once, if there was no call or more than once, means there is a
+    problem
+ • test_exact_cache_get_miss - in similar fashion as the cache it, we check if the cache misses work as intended.
+   We mock the return value of the get method to None (our current default in configtest.py, simulating a proper cache
+    miss.
+   As before, we mock the Redis connection with the patch command.
+   We proceed with the call to the mocked Redis client as before, expecting to receive no results.
+   Last, we check the functionality by asserting if the result of the call was None.
+ • test_exact_cache_set - verifies that the set method works correctly, with the intended TTL.
+   The beginning is always the same, mocking the Redis connection.
+   We call the set method, which internally calls mock_redis_client.set, hence sets in our mocked Redis client.
+   We assert if the set method (taken from the "original" code is called exactly once, which is what is expected.
+   Recalling that, in exact.py script, we defined ex=settings.redis_ttl_seconds, taken from config.py, we check that the
+    arguments passed to the set call are correctly taken from settings(=config.py).
+   It is important to remind that, when we do - await cache.set("query", "context", "response") - internally, we create
+    a key with _make_key, with query "query" and context "context" strings, then, we set the value "response" that WOULD
+    be set in a real Redis and ex, namely we start the life-timer, taking it's lifespan from settings.redis_ttl_seconds.
+    REMARK ARG AND KWARG: when we say - args, kwargs = mock_redis_client.set.call_args -, we are unpacking a tuple
+     (args) and a dictionary (kwargs), for example, in
+            await mock_redis_client.set("my_key", "my_value", ex=3600)
+     we have args = ("my_key", "my_value") and kwargs = {"ex": 3600}, but we will check only for the TTL value to be the
+     correct one set up in the settings(config.py) file, hence, in our case, 3600 (customizable in the given file).
+     The call_args method stores the most recent call to the mock, with the explained values in args and kwargs.
+ • test_exact_cache_delete - tests the correct functionality of the delete method (in case there is a key deleted).
+   The setup is the usual, with the mocked Redis connection.
+   We call the return method and store the metadata response inside of "result". It is important to note that, in
+    conftest.py, we set up mock_redis_client.delete.return_value = 1, hence the delete method in ExactCache will return
+    bool(delete_count), though in our mock test, we set up the delete_count to be 1 (namely, for the original code,
+    there has actually been a key deleted (otherwise, would be delete_count=0), hence result=bool(deleted_count)=True
+    (otherwise, would be result result=bool(deleted_count)=False).
+   We, finally, check that the Redis delete method was issued exactly once, as intended, through the assert.
+ • test_exact_cache_delete_not_found - same logic as the previous test, but to check if everything is correct once there
+    is a cache miss.
+   We set up delete.return value, namely the number of keys delete from Redis, to 0; therefore the bool(delete_count)
+    will be equal to bool(0), hence False. Same check as before apply.
+ • test_exact_cache_stats - verifies that the stats method counts keys correctly; from conftest.py, we set up the
+    scan_iter to return, in the mock Redis client, only the key named "chat:abc123", hence we expect the dictionary
+    stats to have only the expected key.
+   We, finally, check the correctness of the key in the dictionary stats and that the number of items in the dictionary
+    to be equal to 1.
+ • test_exact_cache_close - checks that the closing of the Redis connection works correctly.
+   We try to close the Redis connection through await cache.close() and check if the Redis connection method was called
+    only once, as expected.
+REMARK ON THE PATCH COMMAND: tests the correct functionality of the delete method (in case there is no key to delete).
+ Patch is a context manager provided by the unittest.mock module in Python's standard library; it temporarily replaces a
+  target object (anything between a function, class attribute or variable) with a mock version of the latter, usually in
+  a testing environment.
+ It serves to isolate the "clean" code to the tests made, with their external dependencies, still preserving the main
+  functionality of the given code; acts like the decoratos we described in this file. This makes tests more fast,
+  non-deterministinc (no "RNG"), free of charge (no API costs) and consistent (no "natural" network errors, unless
+  specifically setup to simulate any of them).
+ Internally, for example in - with patch('app.cache.exact.redis') as mock_redis: -, it replaces the target attribute
+  redis inside app.cache.exact with a new MagicMock object, in this case mock_redis and returns the new mock-binding of
+  the "fake" attribute mock_redis inside app.cache.exact. The logic of using "with" is very smooth, as it restore the
+  original atribute redis once the with block finishes, making the code very fluent and robust, with respect to the
+  former logic.
+ It is worth noting that patch comes from unittest.mock, as said, part of Python standard library, not ONLY for pytest;
+  in particular, pytest has no special integration with a patch. It rusn with non-mock object too, replacing the target
+  object with a "new" parameter, for example:
+        with patch('app.config.settings.max_prompt_tokens', new=10):
+  It works with other libraries and test frameworks such as unittest, pytest, nose, doctest.
+REMARK ON LOGGING THE ASSERTION RESULTS:
+There is no reason to add a logging logic to the assertions because, when an assertion is not met, hence the condition
+ is False, pytest raises an AssertionError and a report about why it failed. This is NOT a log message, but a runtime
+ exception that stops the test execution. The assert statements are per-se a tool handling the error and issues
+ reporting.
+
+------------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
 
 ========================================================================================================================
 ========================================================================================================================
@@ -726,7 +890,37 @@ GENERAL NOTES AND HEADS-UP FOR LEARNING
     In our project, we use ainvoke as an asynchronous method that returns us the result of an asynchronous function
      (coroutine), used in frameworks like LangChain and LangGraph; to mock this method, we will use AsyncMock,
      which will simulate the async function, returning an awaitable result when called.
-    
+    These methods allow us to be absolutely certain that the raw project works, not considering "natural" problems
+     given by the actual API model exceptions which arise naturally eventually.
+
+5. DECORATORS
+In our project, we often used decorators, mostly in the Mock part of the project to slightly modify the original
+ functions.
+A decorator is a common design in Python that lets the developer to modify or generalize the behavior of an existing
+ function, method or class, WITHOUT changing the original logic behind the source code or its functioning. It can be
+ compared to adding a laser to a gun, the original gun still works, but the laser gives it an extra functionality,
+ without damaging or internally changing the original gun.
+Below we make a very simple example:
+'''
+def logger(func):
+    def wrapper():
+        print(f"Starting: {func.__name__}")
+        func()
+        print(f"Finished: {func.__name__}")
+    return wrapper
+
+@logger
+def connect_to_database():
+    print("Connecting...")
+    print("Connected!")
+
+connect_to_database()
+# Output:
+# Starting: connect_to_database
+# Connecting...
+# Connected!
+# Finished: connect_to_database
+'''
 
 
 

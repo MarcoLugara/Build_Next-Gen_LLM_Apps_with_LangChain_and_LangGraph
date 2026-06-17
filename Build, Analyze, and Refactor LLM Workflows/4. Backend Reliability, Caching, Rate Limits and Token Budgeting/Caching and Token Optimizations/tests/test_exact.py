@@ -1,7 +1,7 @@
 # tests/test_exact.py
 import pytest
 from unittest.mock import patch   #patch replaces redis.from_url with our mock
-from app.cache.exact import ExactCache
+from app.cache.exact import ExactCache     #the original class we are testing
 from app.config import settings  #the real settings object
 
 @pytest.mark.asyncio

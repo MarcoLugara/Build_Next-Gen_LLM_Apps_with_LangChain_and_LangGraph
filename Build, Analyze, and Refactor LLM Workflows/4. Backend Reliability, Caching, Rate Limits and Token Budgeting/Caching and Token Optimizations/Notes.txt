@@ -828,6 +828,11 @@ REMARK ON PYTEST.MARK.ASYNCIO
 ------------------------------------------------------------------------------------------------------------------------
 
 TEST_SEMANTIC.PY
+We move on to the tests of the SematicCache class, which uses Chroma as the vector database, Redis for the LRU
+ (not native in Chroma), storing documents IDs with their corresponding timestamps and SentenceTrasformer for the
+ generation of embedding locally. We mock all the dependencies to avoid any latency and network constraints and
+ problems. The LRU logic check is crucial, as, if it does not work correctly, it would cause indefinite memory growth.
+
 
 
 

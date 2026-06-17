@@ -1,7 +1,7 @@
 # tests/test_semantic.py
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
-from app.cache.semantic import SemanticCache
+from app.cache.semantic import SemanticCache    #the original class we are testing
 from app.config import settings
 
 @pytest.mark.asyncio

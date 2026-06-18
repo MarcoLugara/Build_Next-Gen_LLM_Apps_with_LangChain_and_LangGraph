@@ -832,9 +832,113 @@ We move on to the tests of the SematicCache class, which uses Chroma as the vect
  (not native in Chroma), storing documents IDs with their corresponding timestamps and SentenceTrasformer for the
  generation of embedding locally. We mock all the dependencies to avoid any latency and network constraints and
  problems. The LRU logic check is crucial, as, if it does not work correctly, it would cause indefinite memory growth.
-
-
-
+These tests will check:
+ 1. The get method for the sematic cache hit.
+ 2. The get method for the sematic cache miss.
+ 3. The add method to store a new entry Chroma collection and set the LRU Redis.
+ 4. The _evict_if_needed eviction method for when we cross the limit for when the LRU cache size exceeds the limit.
+ 5. The stats method which returns the number of keys and consistency flags.
+ 6. The close method which closes the Redis and Chroma connection.
+We analyze how the code behaves, method by method:
+ • test_semantic_cache_get_hit - we check that, upon a cache hit, the returned response is correct and the LRU stats are
+    updated correctly.
+    We create an AsyncMock for the Chroma collection.
+    We mock the query.return_value and simulate the result with a list of lists of IDs made of only one result
+     [['doc123']], we set the distance between the query of the mocked cache hit and the result to be 0.05 and, then,
+     with (cosine) similarity equal to (1-0.05=) 0.95 and, lastly with mocked metadata made of the original query input
+     and the cached response.
+    Next, we mock the SentenceTransformer.encode so that it returns a dummy embedding and, then, converting the numpy
+     array into a list, which is expected by Chroma. This mocks the embedding = self.embedder.encode(text).tolist() in
+     semantic.py.
+    Later, we patch the Chroma client, the SentenceTransformer and the Redis client (as in test_exact.py) with
+     mock_chroma_client, mock_embedder and mock_redis_client and we create our mock instance, where all the dependencies
+     are made of mocks.
+    We set the similarity_threshold to be 0.90, so that 0.95 (the one in our mock) is above it and, therefore, we should
+     actually get a cache hit.
+    Lastly, we begin the assertions for:
+     ○ the cached response to be the mock one, namely "cached answer";
+     ○ the cached query to be the mock one, namely "original query";
+     ○ the sim(ilarity) computed to be the mock one, namely 0.95;
+     ○ the zadd method to correctly update the LRU time on the cached prompt (query + response).
+ • test_semantic_cache_get_miss - we check that, upon a cache miss, no cached response (nor any response) is returned at
+    all and that no LRU updates have been done.
+    Most of the setup is similar to the cache hit case, just return_value of the Chroma collection query, now, is fully
+     empty, namely empty lists.
+    We mock a embedding, as before, into a list, as well as all the patches listed above.
+    Lastly, we do the assertions to check if:
+     ○ response, cached_query and sim(ilarity) are empty (equal to None);
+     ○ the zadd method has been called (we expect it not to be called).
+ • test_semantic_cache_add - we check that the add method to the Chroma collection works as intended. It is important to
+    note that the add method returns, by original method construction, three None, hence, we verify the internal works
+    to act as intended.
+    As always, first, we mock the Chroma collection, embedding operations and patch the usual elements.
+    Then, we add the dummy data ("query", "context", "response text"), with the add method.
+    Right after, we assert that the add method has been used once and same for the zadd (LRU first writing) method.
+   REMARK ON CALL_ARGS(): every Mock (and AsyncMock) method has an attribute called call_args, which stores the
+    arguments from the most recent call to the given mock. When we do
+    - add_args = mock_chroma_collection.add.call_args[1] -, we are assigning the keyword arguments to add_args,
+    therefore, add_args is now a dictionary containing all the parameters passed to Chroma through the original add
+    method.
+   Later, we assert that the "metadata" argument was actually passed  to Chroma and, hence, exists in the add_args
+    dictionary, namely that the structure passed is correct. In our tests, we add only one document, hence
+    - add_args['metadatas'][0] - fetches the first (and only) metadata dictionary.
+   Last, we check that the three fields in the metadata that we set, namely "query", "response" and "created_at" have
+    actually been passed to Chroma, in this test we check if they have been stored into add_args (we call it metadata
+    for simplicity)
+   Can be noted that we do not check the values (because we manually set them into the mock), but that the passing to
+    Chroma through the add method worked correctly.
+ • test_semantic_cache_eviction - we test the eviction method, which removes prompt entries inside the Chroma
+    collection, once max_semantic_cache_entries is surpassed; we note that, in the original project, we call this method
+    every time we add a new semantic cache entry into our Chroma collection (see sematic.py).
+    As always, first, we mock the Chroma collection and embedding operations.
+    We, then, mock the value that would be returned by zcard (which returns the cardinality of the set of the entries in
+     the Chroma collection) to be a large number ("15˙000"); next, we mock the zpopmin return, as the oldest document,
+     the document with id "doc_to_evict" andf timestamp "123456789"), namely we force the search of the odest document
+     to be one we mock.
+    Then, we do the usual patches, as well as we patch the max_semantic_cache_entries to be 10˙000 and
+     semantic_cache_lru_check_frequency to be 1, hence we check every new entry added (we do not need to add thousands
+     for our mock tests, one is enough, given we tested the add method as a standalone too).
+    As it would happen naturally, we call the add method (with mock values
+     ("q", "c", "r") = ("query", "context", "response") ), which should natively, from our code, trigger the
+     evict_if_needed method, given we hardcoded the frequency to one.
+    Lastly, we do the assertion checks and verify, within the evict_if_needed method, if:
+     ○ zpopmin method was actually called once;
+     ○ the delete method actually deleted the mocked document, the one with ID "doc_to_evict".
+ • test_semantic_cache_stats - we check the correct functionality of the stats method, which originally checks how many
+    Chroma entries there are in the collection and if there is consistency between the number of Chroma entries in the
+    collection and the number of LRU istances present in the Redfis system (we recall LRU is NOT native in Chroma). We
+    note that, the good pairing between Chroma entry & LRU detials has been checked with the tests done with
+    the add method. We do it for the case where there is consistency.
+    As always, first, we mock the Chroma collection, but we do not need to mock the embedding operations this time, as
+     we are not adding any new entry, therefore, we do not need any embedding conversion, just the zcard method.
+    We mock the Redis and Chroma count to be both 69, which should means that the stats method should return
+     consistency between Redis and Chroma.
+    We do the usual patches for the Redis server and the SentenceTransformer (see Remark below) istances.
+    Last, we call the stats method and proceed with the assert checks:
+     ○ if the Chroma collection number of entries is 69, as we chose;
+     ○ if the Redis number of entries is 69, as we chose;
+     ○ if the program sees the pairing as consistent (as it should).
+ • test_semantic_cache_stats_inconsistency - we check the correct functionality of the stats method and we do it for the
+    case where there is not consistency.
+    Exactly same layout as before, but we set different values for the Redis and Chroma count, namely 67 and 69.
+    We check, by assert method, if the program return the cosistency check as failed, hence if consistent is False.
+ • test_semantic_cache_close - we test the closure of both the Redis and Chroma connections.
+    Usual setup, but we mock the close client method (we close the Redis with - await cache.close() -, which invokes
+     the real closing method). This means we are closing the Redis and Chroma "mock-multiverse" connections
+    We, finally, assert that the closing method has been closed onceboth for the Redis and for the Chroma clients.
+ REMARK "WHY WE ALWAYS PATCH THE SENTENCETRANSFORMER EVEN THOUGH WE DO NOT ACTUALLY CREATE EMBEDDINGS?" We always have
+  to patch it (and so call it) because SemanticCache.__init__ always runs the line
+  - self.embedder = SentenceTransformer(settings.embedding_model_name) - upon execution, always of the __init__, hence
+  it always loads the embedding model by default, even if we do not explicitly call it. If we do not mock it, the real
+  SentenceTransformer will actually try to load a model, exiting out of the testing scope we are working to show,
+  redoundant and useless for unit testing.
+REMARK: @pytest.mark.asyncio: this marker ensures that the tests that call async methods are async themselves, so that
+ pytest does run them correctly; without it, pytest would treat it as a regular function, which gets called and checks
+ the return value. The tests would pass silently, but the proper assert logic to actually check the tests would not be
+ executed. Long story short, it tells pytest that, what we created, is a asynchronous coroutine (the ones defined with
+ async def) and should be executed inside an asynchronous event loop, substitues writing try: and finally: every time.
+ We remind that, in simple words, a coroutine is an object that represent a function in python that can be stopped and
+ resumed.
 
 
 

@@ -63,7 +63,7 @@ async def test_semantic_cache_add(mock_redis_client):
                 await cache.add("query", "context", "response text")
                 mock_chroma_collection.add.assert_called_once()
                 mock_redis_client.zadd.assert_called_once()
-                add_args = mock_chroma_collection.add.call_args[1]
+                add_args = mock_chroma_collection.add.call_args.kwargs
                 assert 'metadatas' in add_args
                 metadata = add_args['metadatas'][0]
                 assert 'query' in metadata
@@ -91,8 +91,8 @@ async def test_semantic_cache_eviction(mock_redis_client):
 @pytest.mark.asyncio
 async def test_semantic_cache_stats(mock_redis_client):
     mock_chroma_collection = AsyncMock()
-    mock_chroma_collection.count.return_value = 123
-    mock_redis_client.zcard = AsyncMock(return_value=123)
+    mock_chroma_collection.count.return_value = 69
+    mock_redis_client.zcard = AsyncMock(return_value=69)
     mock_embedder = MagicMock()
     with patch('app.cache.semantic.chromadb.PersistentClient') as mock_chroma_client:
         mock_chroma_client.return_value.get_or_create_collection.return_value = mock_chroma_collection
@@ -100,15 +100,15 @@ async def test_semantic_cache_stats(mock_redis_client):
             with patch('app.cache.semantic.redis.from_url', return_value=mock_redis_client):
                 cache = SemanticCache()
                 stats = await cache.stats()
-                assert stats['semantic_cache_entries_chroma'] == 123
-                assert stats['semantic_cache_entries_redis'] == 123
+                assert stats['semantic_cache_entries_chroma'] == 69
+                assert stats['semantic_cache_entries_redis'] == 69
                 assert stats['consistent'] is True
 
 @pytest.mark.asyncio
 async def test_semantic_cache_stats_inconsistency(mock_redis_client):
     mock_chroma_collection = AsyncMock()
-    mock_chroma_collection.count.return_value = 100
-    mock_redis_client.zcard = AsyncMock(return_value=120)
+    mock_chroma_collection.count.return_value = 67
+    mock_redis_client.zcard = AsyncMock(return_value=69)
     mock_embedder = MagicMock()
     with patch('app.cache.semantic.chromadb.PersistentClient') as mock_chroma_client:
         mock_chroma_client.return_value.get_or_create_collection.return_value = mock_chroma_collection

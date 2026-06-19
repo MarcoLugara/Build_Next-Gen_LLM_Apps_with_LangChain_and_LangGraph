@@ -940,6 +940,87 @@ REMARK: @pytest.mark.asyncio: this marker ensures that the tests that call async
  We remind that, in simple words, a coroutine is an object that represent a function in python that can be stopped and
  resumed.
 
+------------------------------------------------------------------------------------------------------------------------
+
+TEST_TOKEN_CONTROL.PY
+This script test the TokenValidator class from token_control-py, which counts tokens used by the HuggingFace tokenizer
+ and has three configurable strategies (which we test): reject, truncate_with_warning and summarize_overflow and,
+ lastly, reroutes unknown strategies to the default, reject.
+The code works as follows:
+ • mock_tokenizer - We define the reusable fixture @pytest.fixture and create a mock tokenizer, through MagicMock, which
+    replaces the HuggingFace one, the encode returns a list made of numbers up until the count of tokens, namely equal
+    to the number of characters (just as an example) and the decode returns a dummy string, though we do not use it in
+    the test.
+    REMARK ON LAMBDA:
+ • test_prepare_prompt_under_limit - it verifies that, if the prompt is under the max_prompt_tokens, it returns it
+    unchanged, with truncated = False and showing the "correct" (the mocked one, in our case) token count.
+   First we patch the former tokenizer with the mock one we defined before and, with the patch, we rename the former
+    class TokenValidator as validator.
+   We create a short mock prompt with the string "short".
+   Before proceeding, we recall that, the original prepare_prompt method returns a tuple made of a string (our prompt)
+    and a dictionary of one element made of True/False if there is truncation and the original token count. In our mock
+    case, we run the prepare_prompt method and return the string "processed" and the "meta"(data) dictionary.
+   We finish with the usual assertions, check if:
+    ○ the string returned by prepare prompt is the correct one, in our mock example "short", namely the prompt;
+    ○ the first element of the dictionary, relative to the True/False for the truncation, which should return False,
+       as the string we mocked is less than the max_prompt_tokens we patched as 100;
+    ○ the second element of the dictionary corresponds to the correct token count, relative to the "handmade" tokenizer,
+       which, we recall, counts the characters, which should return 5 for the prompt "short".
+ • test_prepare_prompt_reject_strategy - we test the correct functioning for the first (and default) strategy reject.
+   As before, we set up (patch) the mocked tokenizer and rename the the TokenValidator class, to use its methods and
+    test them.
+   We patch the max_prompt_tokens to be 10, low enough, and the overflow_strategy to reject, reasonably for our test.
+   We create a dummy prompt longer than 10 words, to check if the strategy is actually triggered by prepare_prompt.
+   We run the prepare_prompt method and catch, from pytest, the TokenLimitExceededError error returned by the original
+    code and rename it, in order to proceed with the assertions.
+   Finally, we do the assertions:
+    ○ we assert that the TokenLimitExceededError error is raised inside pytest;
+    ○ we check if the exc(eption) is actually because the token_count is over the max_prompt_tokens = 10;
+    ○ we check the value for the max tokens stored into the exc(eption) to actually be 10, as we patched up in the mock
+       environment.
+ • test_prepare_prompt_truncate_with_warning - we test the correct functioning for the truncation strategy.
+   As before, we set up (patch) the mocked tokenizer and rename the the TokenValidator class, to use its methods and
+    test them.
+   We patch the max_prompt_tokens to be 10, low enough, and the overflow_strategy to truncate_with_warning, reasonably
+    for our test, and the "truncation_keep_start_ratio" to 0.6.
+   We create a dummy prompt longer than 10 words, to check if the strategy is actually triggered by prepare_prompt and
+    we run the prepare_prompt method, returning the string processed and the dictionary meta(data).
+   Finally, we do the assertions, checking the truncated_prompt return of the _truncate_sliding_window:
+    ○ we check if the truncated method is triggered, hence True;
+    ○ we check if the strategy called is truncate_with_warning;
+    ○ we check if "warning" is present in the meta(data) dictionary;
+    ○ we check if "original_token_count" is present in the meta(data) dictionary;
+    ○ we check if "truncated_token_count" is present in the meta(data) dictionary;
+    ○ we check if the token length token_len of our truncated prompt is actually within the limits, hence less or equal
+       than 10.
+ • test_prepare_prompt_summarize_overflow - we test the correct functioning for the summarization strategy.
+   As before, we set up (patch) the mocked tokenizer and rename the the TokenValidator class, to use its methods and
+    test them.
+   We patch the max_prompt_tokens to be 10, low enough, and the overflow_strategy to summarize_overflow, reasonably
+    for our test, and the "summarization_keep_ratio", namely the percentage to keep as it is,
+    without summarizing to 0.6.
+    Moreover, we force the mock summarizer to return the string "Fake summary", via MagicMock().
+   We create a dummy prompt longer than 10 words, to check if the strategy is actually triggered by prepare_prompt and
+    we run the prepare_prompt method, returning the string processed and the dictionary meta(data).
+   Finally, we do the assertions, checking the truncated_prompt return of the _summarize_overflow:
+    ○ we check if the truncated method is triggered, hence True;
+    ○ we check if the strategy called is summarize_overflow;
+    ○ we check if "warning" is present in the meta(data) dictionary;
+    ○ we check that the summarized version returns "Fake summary", which is the summarizations we "force" through our
+       mock summarizer;
+    The truncation assert, per-se, have been checked in the test_prepare_prompt_truncate_with_warning set of tests.
+ • test_prepare_prompt_unknown_strategy_fallback - verifies that, upon selecting a strategy that is not one of the three
+    we defined, it rollbacks to the default reject strategy. To do so, to actually raise the TokenLimitExceededError
+    error, we use a long enough prompt that exceeds the usual patched max_prompt_tokens.
+   We do as before, but set the strategy to be invalid, in particular to be "unknown_strategy" and we set the
+    max_prompt_tokens to 10.
+   Finally, we do the assertions, checking if:
+    ○ the TokenLimitExceededError error has been raised by pytest, hence if we actually rolled back to the reject
+       strategy.
+
+------------------------------------------------------------------------------------------------------------------------
+
+TEST_LLM_CLINT.PY
 
 
 ========================================================================================================================

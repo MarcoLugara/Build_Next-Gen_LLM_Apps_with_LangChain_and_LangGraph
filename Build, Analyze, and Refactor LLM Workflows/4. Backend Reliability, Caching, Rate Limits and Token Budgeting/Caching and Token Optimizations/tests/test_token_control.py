@@ -75,4 +75,5 @@ async def test_prepare_prompt_unknown_strategy_fallback(mock_tokenizer):
         with patch.object(settings, 'max_prompt_tokens', 10):
             with patch.object(settings, 'overflow_strategy', 'unknown_strategy'):
                 with pytest.raises(TokenLimitExceededError):
-                    await validator.prepare_prompt("this prompt is long")
+                    prompt = "This is a very long prompt"
+                    await validator.prepare_prompt(prompt)

@@ -951,7 +951,35 @@ The code works as follows:
     replaces the HuggingFace one, the encode returns a list made of numbers up until the count of tokens, namely equal
     to the number of characters (just as an example) and the decode returns a dummy string, though we do not use it in
     the test.
-    REMARK ON LAMBDA:
+   We create tow lambda functions:
+    1. the first takes a string and returns a list of integers from 0 up to the length of the text - 1, as a very simple
+        encoding simulation;
+    2. the second takes a list of integers (tokens IDs), we call "tokens" and returns a string that we defined as
+          ''.join(chr(ord('a') + t % 26) for t in tokens)
+        This is made of:
+         ○ ''.join(...) - which merges the generated characters into a single string;
+         ○ chr() converts ASCII code into a single character;
+         ○ we take every single token ID, which we call "t" and we return the ASCII code of a lowercase letter, made of
+            ord('a')=97, the ASCII code of the letter a (an integer, in general) plus each letter's token ID and,
+            finally, by writing % 26, we ensure the result stays between 0 and 25 (namely between letter "a" and "z").
+            For example [0,1,2] returns abc.
+    REMARK ON LAMBDA: lambda acts like a "quick-use" function, where we define:
+           variable_result = lambda argument_of_the_function : result_of_the_function
+     where a comma separates the list of inputs (arguments) and a SINGLE expression (result) is returned.
+    REMARK ON SIDE_EFFECT: if we used .return_value, the result of the function would have been the same, regardless of
+      the input; in our case, we use .side_effect as it can return different values depending on inputs, exception raised
+      or side effects like logging. Using return_value, would return the same token list, regardless of the prompt,
+      breaking our tests.
+     For example:
+      mock = MagicMock()
+      mock.return_value = 42
+      print(mock("anything", arg2=123))  #returns 42
+      print(mock("different"))           #returns 42
+     Unlike:
+      mock = MagicMock()
+      mock.side_effect = lambda x: 2 * x
+      print(mock(5))    #returns 10
+      print(mock(10))   #returns 20
  • test_prepare_prompt_under_limit - it verifies that, if the prompt is under the max_prompt_tokens, it returns it
     unchanged, with truncated = False and showing the "correct" (the mocked one, in our case) token count.
    First we patch the former tokenizer with the mock one we defined before and, with the patch, we rename the former
@@ -1020,7 +1048,47 @@ The code works as follows:
 
 ------------------------------------------------------------------------------------------------------------------------
 
-TEST_LLM_CLINT.PY
+TEST_LLM_CLIENT.PY
+This script tests the functionality of the llm_client.py script, which initializes the ChatGroq LLM instance, together
+ with the call_llm_with_reply method, which retries the LLM call upon specific error instances, made of httpx
+ exceptions, in particular the NetworkError, TimeoutException and HTTPStatusError errors, and, finally, returns an
+ exception, hence an error, when the max number of retries have been tried. We will check that no retries are triggered
+ upon other exceptions, as by design of our original process as well as we check that the algorithm actually stops after
+ reaching the max number of retries, originally set up in config.py.
+These tests will check the correct functioning of the tools we used in llm_client.py, from the tenacity library,
+ for the retries setup.
+The code is structured as follows:
+ • test_llm_client_generate_success - verifies that, upon a succeeded LLm call, the generate method returns the expected
+    response without going into the retry finite loop.
+   We mock the llm with AsyncMock to start and force its response, upon using the .invoke method) to be the
+    "Mocked response" (simulating a successful LLM response) string and patch the llm client to be our mock_llm.
+   We create the client, using the mock LLM.
+   Lastly, we call the original generate method and begin the assertions:
+    ○ we check if the response is fetched correctly from our mock LLM, namely if it is "Mocked response";
+    ○ we verify if the ainvoke method was actually called once, namely we check that no retries have been done
+ • test_llm_client_retry_on_network_error - we verify that, upon receiving a NetworkError, the retry decorator kicks in
+    and triggers a retry for the LLM call, for simplicity, we assume the second call to work, with our mock and patches.
+   We patch the original groq LLM and replace it with our mock one and we mock the ainvoke method to return, on first
+    instance a NetworkError with description "Fake network error" and, second, we mock a successful call.
+   As before, we call the original LLMClient class and run the generate method on a mocked test prompt.
+   We, last, check with assert that:
+    ○ the actual final result is NOT the first one of our mock ainvoke, but the second one, namely, the original
+       generate actually saw the NetworkError;
+    ○ to make sure, we check that the ainvoke method was called exactly twice, hance the retry decorator actually ran.
+ • test_llm_client_retry_on_timeout - exactly as the test before, but for the error TimeoutException; same asserts too.
+ • (the test with HTTPStatusError would be exactly the same)
+ • test_llm_client_no_retry_on_other_exceptions - in this case, we test that, upon an error not in the
+    retry_if_exception_type list, no retries are triggered, but, still, the error text is shown tp the user.
+   We check if
+    ○ the error raised up is defined by the text we chose in the mock;
+    ○ the ainvoke method was actually called one, hence no extra call are made upon unknown errors.
+ • test_llm_client_max_retries_exhausted - we check that, in our case, setting up the mock LLM to return the same
+    NetworkError three times, after the third, it actually stops looping. We recall that, loading from the original
+    class, if we do not patch the retry_attempts, they will be loaded normally from config.py, hence, in this case,
+    they are, as normal default, at most 3.
+   Similar code composition, we check that
+    ○ the correct error is raised all the three times;
+    ○ the ainvoke method is actual ran exactly three times
 
 
 ========================================================================================================================
@@ -1028,10 +1096,9 @@ TEST_LLM_CLINT.PY
 
 GENERAL NOTES AND HEADS-UP FOR LEARNING
 1. UNDERSCORE BEFORE METHODS/FUNCTIONS IN PYTHON.
-    In Python a _ (underscore) before a method means that given method is for INTERNAL use only or protected in some way:
-     it signals to other (maybe future) developers and other tools that this method is NOT part of the public API and
-     should NOT be called outside the class
-
+    In Python a _ (underscore) before a method means that given method is for INTERNAL use only or protected in some
+     way: it signals to other (maybe future) developers and other tools that this method is NOT part of the public API
+     and should NOT be called outside the class.
 2. SELF (We use self.XXXX many times in our project, it is worth to write a detailed explanation of its features).
     self method is a crucial technique in OOP (Object Oriented Programming) in Python. self is a conventional parameter
      name used to pass a method on an instance, using the instance itself as the first argument and it refers to the
@@ -1046,17 +1113,13 @@ GENERAL NOTES AND HEADS-UP FOR LEARNING
      • class Mynumber:
            def __init__(self, value):
                self.value = value
-
            def print_value(self):
                print(self.value)
-
-       obj1 = Mynumber(17)
-       obj1.print_value()
-     obj1 = Mynumber(17) - creates an object named obj. In __init__(), self will refer to obj1.
-     self.value = value - stores 17 in the object's value attribute.
+       obj1 = Mynumber(17) - creates an object named obj1. In __init__(), self will refer to obj1.
+       self.value = value - stores 17 in the object's value attribute.
+       obj1.print_value(17) - prints the value, namely 17.
      When - obj1.print_value() - is called, self, again, refers to obj1, therefore its attribute (the value 17) is
       printed.
-
 3. MODEL MATCHING BETWEEN TOKENIZER AND SUMMARIZATION
    Different models use different tokenization techniques, algorithms and vocabularies (like special character
     interpretation), namely the process of converting words and strings into a sequence of integers IDs (aka tokens),
@@ -1075,7 +1138,6 @@ GENERAL NOTES AND HEADS-UP FOR LEARNING
     2. truncating the prompt (in case we use the sliding window method);
     3. counting the tokens and tokenizing the prompt before applying the summarization method (if is the one used)
         and redecoding the summary produced into strings (aka text).
-
 4. TESTABILITY
     To ensure the project works flawlessly, we create a mock control setup, testing all the scenarios studied, in depth;
      to achieve this, a new section of files, grouped in a subfolder called tests, using the library pytest.
@@ -1084,7 +1146,6 @@ GENERAL NOTES AND HEADS-UP FOR LEARNING
      which will simulate the async function, returning an awaitable result when called.
     These methods allow us to be absolutely certain that the raw project works, not considering "natural" problems
      given by the actual API model exceptions which arise naturally eventually.
-
 5. DECORATORS
 In our project, we often used decorators, mostly in the Mock part of the project to slightly modify the original
  functions.

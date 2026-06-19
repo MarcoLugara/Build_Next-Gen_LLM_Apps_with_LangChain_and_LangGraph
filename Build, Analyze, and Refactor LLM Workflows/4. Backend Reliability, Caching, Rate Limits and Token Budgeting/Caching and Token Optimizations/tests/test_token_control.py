@@ -1,8 +1,8 @@
 # tests/test_token_control.py
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
-from app.cache.token_control import TokenValidator, TokenLimitExceededError
-from app.config import settings
+from app.cache.token_control import TokenValidator, TokenLimitExceededError     #the original class we are testing
+from app.config import settings     #the real settings object
 
 @pytest.fixture
 def mock_tokenizer():

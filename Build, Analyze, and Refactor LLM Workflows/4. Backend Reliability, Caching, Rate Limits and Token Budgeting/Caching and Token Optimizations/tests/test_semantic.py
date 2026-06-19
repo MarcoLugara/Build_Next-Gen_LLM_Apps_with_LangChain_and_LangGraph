@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 from app.cache.semantic import SemanticCache    #the original class we are testing
-from app.config import settings
+from app.config import settings     #the real settings object
 
 @pytest.mark.asyncio
 async def test_semantic_cache_get_hit(mock_redis_client):

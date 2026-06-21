@@ -3,7 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock, patch
 from app.main import app     #the original class we are testing
-from app.cache.token_control import TokenLimitExceededError
+from app.cache.token_control import TokenLimitExceededError      #for the rejection in case of TokenLimitExceededError
 
 @pytest.fixture
 def client():
@@ -82,7 +82,7 @@ def test_chat_endpoint_cache_miss(client):
 
 def test_chat_endpoint_token_rejection(client):
     client.app.state.token_validator.prepare_prompt = AsyncMock(side_effect=TokenLimitExceededError(8500, 7000))
-    response = client.post("/chat", json={"query": "very long query" * 1000, "context": ""})
+    response = client.post("/chat", json={"query": "old_man_talking" * 1000, "context": ""})
     assert response.status_code == 400
     data = response.json()
     assert data["error"] == "TOKEN_LIMIT_EXCEEDED"

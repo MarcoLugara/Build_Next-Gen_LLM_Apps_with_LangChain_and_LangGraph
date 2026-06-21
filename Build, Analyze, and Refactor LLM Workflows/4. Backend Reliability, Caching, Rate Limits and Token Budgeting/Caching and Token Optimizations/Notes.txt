@@ -1090,6 +1090,104 @@ The code is structured as follows:
     ○ the correct error is raised all the three times;
     ○ the ainvoke method is actual ran exactly three times
 
+------------------------------------------------------------------------------------------------------------------------
+
+TEST_MAIN.PY
+This script tests the FastAPI endpoints defined in main.py, namely /chat, which handles cache hits/misses, token limit
+ rejections and Network errors, /cache/stats, which returns stats about the cached response stored and /health, which we
+ set up to return by default {"status": "ok"}, but can be generalized and expanded as a concept,
+ just a sanity check for us.
+The script works as follows:
+ • client() - we write this fixture to override the default configurations of our "real" main.py, replacing them with
+    mocks; the yield will return the TestClient instance to the test functions, with the client parameter, WITHOUT
+    exiting the with block, which are still active, because the yield is inside them. Therefore, out test function runs
+    using client to make requests to the pathched app.
+    We do NOT use return TestClient(app), we would exist the function, hence we would exit the with blocks, which we
+    WANT to use during the tests; this way, we do the tests WITH the with blocks and, when the test is finished, we go
+    back to the "normal" client
+ REMARK ON YIELD: the yield is a keyword that takes a function and returns a generator, which is an iterator which
+  pauses at execution, returns a value to the object that called it and, after that, proceeds from where it paused.
+  Unlike return, which terminates the execution (take N objects and return and object result), the generator pauses the
+  function, generally for checking intermediate values.
+  Below is a very simple example that spicifies the idea:
+      '''
+      def my_generator():
+          print("Start")
+          yield 1
+          print("Middle")
+          yield 2
+          print("End")
+      gen = my_generator()
+      next(gen)  # Prints "Start", returns 1, pauses
+      next(gen)  # Prints "Middle", returns 2, pauses
+      next(gen)  # Prints "End", raises StopIteration
+      '''
+ • test_health_endpoint - simple check that the /health() endpoint actually returns "200 OK" with {"status": "ok"}, as
+    we decided in the original project.
+ • test_cache_stats_endpoint - tests that the /cache/stats endpoint actually returns the correct statistics about the
+    sizes of the exact and semantic cache store, as well as a correct status_code upon calling the GET method and the
+    max_entries for the sematic cache, which would originally be taken from max_semantic_cache_entries in config.py, in
+    our case we patch it before testing.
+   After using AsyncMock to mock the exact and semantic cache entries, we check via assert that, upon calling
+    .get("/cache/stats"), we get that cache stats returned correctly, by checking the json given by the response, namely
+    we assert that:
+    ○ the response to the .get("/cache/stats") is regular, namely statsu_code = 200;
+    ○ the exact_cache_size and semantic_cache_size is the one set through the mock;
+    ○ the semantic_cache_max_entries is the one set through the mock.
+    We recall that the json returned by using the .get("/cache/stats") method has the following fields:
+     exact_cache_size, semantic_cache_size, semantic_cache_max_entries, cache_hit_rate_total, cache_hit_rate_exact,
+     cache_hit_rate_semantic, total_requests, total_tokens_saved.
+ • test_chat_endpoint_exact_cache_hit - we verify that, upon a exact cache hit, the response is given directly, without
+    calling the LLM.
+    We, first, mock the get method for the exact_cache to hit and return the string "exact answer" and for the
+     semantic_cache to miss.
+    Then, we send a request through /chat, through a POST request with a dummy json body (correct metadata for the
+     original POST method to work and we start with the checks:
+     ○ we check that we actually returned a response (status_code = 200)
+     We, then, save the response, which should be the one recycled from the mock exact_cache and check if:
+     ○ we got a cache_hit (hence if it is True in the response meta(data);
+     ○ the cache_hit is of exact time (and not semantic), as we set up through the mocks;
+     ○ the answer is the one set up in the mock exact_cache.
+ • test_chat_endpoint_semantic_cache_hit - very similar as the exact method, but, this time, we trigger the mock
+    semantic_cache to get a hit, setting the similarity to 0.95 (we recall that, to correctly get a semantic_cache hit,
+    the similarity MUST be above the similarity_threshold, which we did not patch, hence will be the original one, set
+    to default to be 0.92 in config.py) and the exact_cache to miss.
+   We proceed with the same asserts as per the exact_cache tests.
+ • test_chat_endpoint_cache_miss - we test the correct functionality in the case where both cache, exact and semantic,
+    miss, to properly trigger the LLm response and check if it is registered correctly in the response JSON.
+   We mock both exact and semantic cache to return None upon calling the get methods.
+   We mock the token validator prepare_prompt method to use "processed prompt" as prompt to send the LLM and to not
+    reject nor truncate, setting the mock token_count for the processed_prompt to 50 (below the original
+    max_prompt_tokens = 7000).
+   Then, we mock generate a response from the LLM to be "LLM generated answer" and mock the count token for
+    the response to return 100.
+   Later, we use the .post method to actually receive the (mocked) LLM reponse and store it with its metadata.
+   Last, we move one to the usual assertions:
+    ○ we assert the response to have been processed correctly (status_code = 200);
+    ○ we check that there was not cache hit (hence no cache type);
+    ○ we check the generated answer to actually be the LLM-mocked one we setup previously;
+    ○ we check the amount of tokens sent and received to be the one we chose with the mock;
+    ○ we get the set/add method for the exact/semantic_cache to be ran once, given we generate a new answer
+       (we do not care about the storing, checks for the exact and semantic cache have been thoroughly done before).
+ • test_chat_endpoint_token_rejection - we test the /chat endpoint to actually return a structured error response upon
+    exceeding the max_prompt_tokens, by default set, even in config.py, to 7000. We recall that the overflow_strategy by
+    default is "reject", hence should return HTTP (status_code) 400 with error  TokenLimitExceededError.
+   We mock the token_validator to return, upon calling the .prepare_prompt method, a TokenLimitExceededError for using
+    8500 tokens, instead of 7000 max_prompt_tokens.
+   We simulate posting a prompt with a very song text ("old man talking" * 1000).
+   After checking that the .post method returns us an error with status_code 400 (HTTP 400), we create the JSON response
+    and check (assert) if its meta(data) is correct, namely we check if:
+     ○ the error raised is "TOKEN_LIMIT_EXCEEDED", as decided in main.py;
+     ○ the token counts for the prompt and the generated response are the correct (mocked) amounts.
+ • test_chat_endpoint_llm_service_unavailable - we verify if the program actually reports the correct error when the LLM
+    client raises an exception, namely after all retry_attempts have been exhausted.
+    It works as follows:
+     ○ we mock the exact and semantic caches instances and the prepare_prompt method to return empty (not needed), as
+        well as the generate method for the llm_client to return the exception "LLM connection error";
+     ○ through the /chat endpoint (POST method), we generate a response and check if it returned status_code error 503,
+        which should return "LLM_SERVICE_UNAVAILABLE";
+     ○ upon generating the JSON (meta)data of the response, we check if the error is actually "LLM_SERVICE_UNAVAILABLE";
+        and if the error message (in the metadata) is the one we set up with the mock.
 
 ========================================================================================================================
 ========================================================================================================================

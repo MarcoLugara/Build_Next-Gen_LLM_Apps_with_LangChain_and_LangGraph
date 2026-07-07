@@ -1,1 +1,118 @@
 ### CONFIG.PY
+These config settings will allow smooth changes without redeploying the whole project, are environment-aware, between
+  development, staging and production. Moreover, all modules follow constraints taken from here; for commodity, we will
+  import the file as "settings" APIs information are kept safe in local .env settings files.
+ This file will take care of multi-provider LLM settings, Cache and Vector DBs, token control strategies, budget
+ management strategies as well as resilience and observability features.
+Let us go through the sections:
+ • class ModelConfig - allows us thorough control over the model settings, given a model with its ID, e.g. gpt-4-turbo
+    or llama3-70b-8192.
+ • class ProviderConfig - allows us to group settings for a specific provider (not model), like groq, ollama, openai).
+    We remark that local models do NOT need an API key, like through ollama.
+    We set up a possible base_url to redirect traffic to a secure and private server, enhancing security and complying
+     with regulations (like HIPAA). Very handy for scaling into corporations settings, for local offline testing, secure
+     data caching, customizing traffic spread (if the usage is high) and easy to refactor in case of a change of AI
+     provider, which can be useful given the rapid evolution and competitiveness of LLMs. Can be used for Cloud
+     providers like AWS or Azure or for internal proxies.
+    @field_validator - a decorator running after the field is parsed, but before the model is initialized; the
+     "validate_default_model" function receives a class (cls), a value (v) and a ValidationInfo object (info) and it
+     checks if the default_model(=v) exists as a key in the model dictionary, otherwise it returns an error, avoiding
+     stupid runtime errors due to bad settings (before the model is actually initialized).
+ • class CacheConfig - enhancement of the previous project about the caching and token control, applied in this broader
+     setup, see previous project https://lnkd.in/eu8-9wYC
+    A new feature is the multi-tenancy: in case of the same project used, for example, for different tenants, these
+     settings allow to prefix all caches with a tenant ID to prevent pollution between tenants, yet parse through all of
+     them at once. For a single tenant, it is set to None, but can be a way to scale the project in case of growth of
+     the environment using it.
+ • class TokenConfig - similar setup for the tokenizer and overflow strategies developed in the previous project, see
+    (same link in the previous class)  https://lnkd.in/eu8-9wYC).
+ • class BudgetConfig - this class  is the cornerstone of our FinOps part: it defines constraints for the budgets per
+     tenant, the warning threshold and auto-downgrade rules.
+    We define the budget timespan window, monthly would be 30 days, and we track the spending in that span; easily
+     customizable and, set a budget per tenant per window to 100$, again, easily customizable.
+    To alert the User and ease the consumption, we set an alert at 80% usage spent, usual with real-life traceable
+     spending; upon reaching the warning_threshold_ratio, the User is switched, with warning to a cheaper model and,
+     upon reaching the chapped max usage "hard_limit_ratio" (if "auto_downgrade_enabled" is set to True, we reject the
+     request with HTTP 429.
+    Last, we track the spending for a certain amount of token, e.g. 1k, returning, for example
+     {"openai:gpt-4-turbo": 0.03}.
+ • class EvalConfig - this class regulated the continuous evaluation engine, including RAGAS (Retrieval-Augmented
+     Generation Assessment), hallucination detection and drift (of performance or behavior) detection, and general
+     metrics tracking.
+    This evaluation engine can be either turned on or off at will with "enabled", for example in early development.
+    The "golden_dataset_pat" is a JSON pre-made file with good Q&A queries, for the model to relate and "look up" to.
+    The evaluation cycle, once turned on, can be set to run periodically on a fixed time interval set with
+     "eval_frequency_seconds" we set it to run every hour as default.
+    In the "metrics" field, we list the most used RAGAS metrics, to be analyzed; moreover, we use a fine-tuned small
+     HuggingFace model specifically aimed at detecting hallucinations.
+    The drift detection is governed by the time cycle set with "drift_detection_window_minutes", we set it to run every
+     hour as default.
+ • class ObservabilityConfig - this class governs the settings for the OpenTelemetry tracing, Prometheus metrics and
+     live logging.
+    We use "service_name" for the telemetry and leave it customizable for different backends, like Jaeger, Tempo or
+     Zipkin; we will run tests for everything at the end, upon different services.
+    We have a trigger, namely "enable_metrics", to enable the metric and a pointer for them to land on a given port, by
+     default it is 8001.
+    We set up the standard log levels for loguru to elaborate them (as previous project) and update it by giving the
+     option to return them in a cleaner JSON format.
+ • class ResilienceConfig - governs all technical settings for the possible LLM call breakers, such as timeouts, retry.
+    The timeout and retry attempts is analogous to the previous project.
+    A new tool has been added to monitor a circuit breaker for the pool of models: after 5 failed calls, we reroute to a
+     new model ensuring continuity of the service upon provider errors and, after 60 seconds (time customizable), we
+     check for the life of the former provider; upon two successful attempts, we reroute to the original provider,
+     closing the circuit.
+ • class Settings - the mother of the configuration, loading the secret and critical environment variables and .env
+     files.
+    We list all provider and their configurations and an ordered list of which to try, where the order represents
+     priority, namely, if one fails, we move to the next.
+    Then, we rewrite in this class a nested list of the classes defined above and created a nested model, basically a
+     parent configuration classes with each former class as child, this serves to ensure what is called
+     "Separation of Concerns", industry standard for handling complex scenarios and environments: we avoid making a huge
+     class with hundreds of fields, which is hell to maintain; moreover, the "default_factory" ensures to not run into
+     "Mutable Default Argument" problems: to track bugs more cleanly as it does pass the whole class when called and
+     edits on objects of the first call will not interfere with objects of the second one, much cleaner to track bugs.
+     It allows granular validation and error handling, as it will point to the specific object that failed in the class
+     it failed in. Another very clean (therefore pretty for me as a mathematician) feature is that it allows to load
+     configurations .json or .yaml files far more cleanly, like:
+                        cache:
+                            ttl: 60
+                            max_size: 1000
+                        token:
+                            secret: "my_secret"
+                            expiry: 3600
+                        budget:
+                            monthly_limit: 100.0
+     parsing the values into the correlated Python dictionaries inside the former classes. Last, but not least, allows a
+     clean UI-wise tracking of the configuration values.
+    Later, we define an "environment" field that will custimize the application settings depending on the environment,
+     for example more verbose logging in dev and stricter on production.
+    The nested Config class will load the variables from a .env file inside the project root; specifies the encoding and
+     ignores any extra fields, to prevent it breaking.
+    Two additional sanity checks are: - @field_validator("active_providers") - which checks if all active providers are
+     associated to a key in the "providers" dictionary, avoiding silent failures; and - def get_model_config - which
+     gets the configurations for the model chosen and reports errors in case of providers, models not existing or
+     if a model is not defined for a given provider.
+    We add a tracker for the cost (for the FinOps engine) to study the cost of a model/provider each 1k tokens.
+     Will return zero for locally deployed models (of course).
+ • For easier imports, we sum up the settings class with settings, to be used in other scripts.
+
+
+REMARKS:
+ 1. NUCLEUS SAMPLING: nucleus sampling is the evolution of the top_k method, which looks at a fixated number of most
+     likely tokens (see the paper The Curious Case of Neural Text Degeneration, 2019), called the Greedy; nucleus
+     sampling will look at the cumulative probability mass of most likely token (high to low) and take as many tokens
+     until the probability mass reaches the chosen value of top_p. We call "nucleus" the dynamic set of tokens and the
+     industry sweet spot is 0.9.
+     In top_k, if we have a token with 99% probability, we will force to parse wasted tokens to reach the top_k set
+     number of token, wasting compute power; unlike top_p which would only process the "certain" token without garbage
+     computing. In the case we have 100 tokens at 0.01 probability, we will parse all, enhancing creativity; unlike
+     top_k, which would chop some of them upon reaching the chosen top_k cap. Hence, unlike top_k, top_p enhances speed
+     and narrowness in case of certain choices and provides creativity with a broader spectrum in the case of a wider
+     pull of equally low-mass possibilities.
+ 2. FREQUENCY PENALTY: Is a mathematical algorithm that tracks how many times a specific token has been used and add a
+     penalty to the given token, making it progressively harder to be repeated. Will be tested at the end part of the
+     project to analyze the behavior of responses upon changing the indexes.
+ 3. PRESENCE PENALTY: every one token that appears will get a given penalty ONCE throughout the rest of the generation
+     and encourages the model ot be more creative rather than rehashing the same subjects, without specific increasing
+     amounts of penalty for the single tokens (which is the frequency penalty). Will be tested at the end part of the
+     project to analyze the behavior of responses upon changing the indexes.

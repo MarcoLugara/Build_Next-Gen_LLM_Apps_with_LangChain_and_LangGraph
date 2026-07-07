@@ -1,4 +1,4 @@
-### CONFIG.PY
+### APP/CONFIG.PY
 These config settings will allow smooth changes without redeploying the whole project, are environment-aware, between
   development, staging and production. Moreover, all modules follow constraints taken from here; for commodity, we will
   import the file as "settings" APIs information are kept safe in local .env settings files.
@@ -72,7 +72,8 @@ Let us go through the sections:
      "Mutable Default Argument" problems: to track bugs more cleanly as it does pass the whole class when called and
      edits on objects of the first call will not interfere with objects of the second one, much cleaner to track bugs.
      It allows granular validation and error handling, as it will point to the specific object that failed in the class
-     it failed in. Another very clean (therefore pretty for me as a mathematician) feature is that it allows to load
+     it failed in. This allows clean backward-compatible tracking and design even for a third person dev.
+    Another very clean (therefore pretty for me as a mathematician) feature is that it allows to load
      configurations .json or .yaml files far more cleanly, like:
                         cache:
                             ttl: 60
@@ -96,7 +97,6 @@ Let us go through the sections:
      Will return zero for locally deployed models (of course).
  • For easier imports, we sum up the settings class with settings, to be used in other scripts.
 
-
 REMARKS:
  1. NUCLEUS SAMPLING: nucleus sampling is the evolution of the top_k method, which looks at a fixated number of most
      likely tokens (see the paper The Curious Case of Neural Text Degeneration, 2019), called the Greedy; nucleus
@@ -116,3 +116,75 @@ REMARKS:
      and encourages the model ot be more creative rather than rehashing the same subjects, without specific increasing
      amounts of penalty for the single tokens (which is the frequency penalty). Will be tested at the end part of the
      project to analyze the behavior of responses upon changing the indexes.
+
+
+------------------------------------------------------------------------------------------------------------------------
+
+### APP/MODELS.PY
+As done in the previous project, we define all the data structures (request and response schemas) to navigate through
+ the API gateways; they serve as the contract between how information should look upon communicating between client and
+ server. New additions compared to the old project are: multi-tenancy handling, we added a tenant_id field in the
+ request/response, FinOps tracking, a schema for the BudgetStatus has been added to track budget warnings and limits,
+ an EvalMetadata, which attaches quality scores to responses and upgraded stats tracking for cached hit rates.
+ For clarity, we always use UCT timestamps for everything, can be converted by the client, avoiding ambiguity.
+Let us go through the sections:
+ • class ChatRequest - defines the structure of an incoming request from the client, similar to the first project.
+    We add tenant_id to the fields, to separate caches upon different tenants, provide budget tracking and analytics
+     per-tenant, more accurate, and attach tenant dependencies to logs for troubleshooting and specific analysis.
+    If there is no multi-tenant environments, we keep it to None (as our previous project) and we fall back to the
+     "default" tenant, which reports FinOps data to default_tenant_budget_usd.
+    Moreover, we add a way to force a provider (ignoring the active_providers list), for A/B testing and testing;
+     if None, searches the provider inside active_providers, as formerly intended. Same is applied for the model,
+     overriding, eventually, the default_model for the given provider, and for the max_tokens, overriding the value in
+     ModelConfig.
+    We give the option to attach tags to metadata information, which will propagate to logs and traces, can be used in
+     scaling the idea in a broader environment of Users
+ • @field_validator("provider_key") - and - @field_validator("model_name") -  simply make sure model_name and
+    provider_key are not empty, which would cause silent routing errors.
+ • class BudgetStatus - schema for FinOps information for a given tenant, which will be attached to responses, useful
+    for internal choices. We decouple the BudgetStatus from being directly attached to the request, i.e. different
+    schema; this allows to attach budget info to requests without needing to call a separate API, reducing latency.
+    We define tenants and attach a budget is USD for each (customizable), as well as a counter with how much they spent,
+     and they have left and a ration (between 0 and 1) between spent/total, always per tenant.
+    We add a warning flag, if they reached the amount which triggers a warning (default 80% of total budget) or if they
+     ran of budget, prompting a reject request with HTTP 429, or if they have been downgraded to a cheaper model (upon
+     reaching the warning amount). Last, we add a tracking for the current model in use for the given tenant.
+ • class EvalMetadata - governing the fields regarding the continuous evaluation engine, attached to responses, to give
+    clients the visibility about the response quality. We define it as an asynchronous setup, in order not to slow down
+    ChatResponse and handle non-critical post-processing eventually on a side, decoupling the runtimes.
+    We define a "score", overall quality score between 0 and 1; a metrics dictionary which returns the score for each
+     given metric (from RAGAS/DeepEval). The default_factory ensures a new empty dictionary is created upon creating a
+     new instance of the model, similarly to what has been done in CacheConfig. Moreover, we add a score to detect the
+     hallucinations.
+    Last, we add a timestamp for when the evaluation has been processed or None if there has not been any.
+ • class ChatResponse - this class defines the output of our gateway, containing the LLM's response as well as metadata
+    for observability, budget tracking and quality analysis.
+    We save the original query, the response (LLM-generated text), the provider_key and model_name of the LLm that
+     actually provided the answer, for auditing later, a flag whether we got a cache hit or not and if it was literal or
+     semantic, the similarity score in case of a semantic cache hit, the token_control strategy that was used (if any)
+     and a human-readable message from the token control engine, the number of tokens sent with the prompt to the
+     LLM, the sum of token between query and answer, the tokens eventually saved through the cache hit (if any), the
+     computed cost of token spent on the prompt (using cost_per_1k_tokens  from config.py), the budget status for the
+     given tenant (if tenant_id is provided, None otherwise), the score obtained from the evaluator engine, the time
+     latency between answer and response from the LLM in ms, the timestamp relative to when the answer was generated,
+     and, lastly, eventual metadata echoed from the request.
+ • class ErrorResponse - structure of the error response generated in case of any, for consistency and auditing.
+    We save the error_type, namely machine-readable error code, the message displayed in the error log and/or to the
+    User, optional additional details (e.g. budget info, token counts, etc.), and the timestamp when the error arose.
+ • class CacheStatsResponse - cache response structure for monitoring and auditing dashboard and admin endpoints, in
+    case of cache hit.
+    We define as variable, the exact and semantic cache size, in Redis and Chroma, the max entries for semantic cache,
+     set up in CacheConfig in config.py, the total request made until now and the cache hit rate with respect to the
+     total request, computed in total, for exact and for semantic cache. This allows tidy and precise monitoring.
+    We save the number of tokens saved across all request through the cache hits.
+ • class ServiceStatus - health check schema for the LLM, as well as storing uptime and dependency health.
+    We save service_name (i.e. the observability service name from config.py), a status flag, the timestamp for when the
+    FastAPI application started, the current
+     uptime and a dictionary mapping each dependency to its health status, giving audit visibility to where the problem
+     is located, in case there is one.
+
+
+
+REMARKS:
+1. RAGAS:
+2. DeepEval:
